@@ -139,9 +139,14 @@ paperfind recommend --collection "active learning"
 
 # Save recommendations to markdown file
 paperfind recommend -o recommendations.md
+
+# Reranking is enabled by default; tune candidate pool or disable if needed
+paperfind recommend --rerank-candidates 50
+paperfind recommend --no-rerank
 ```
 
 The markdown file includes title, authors, abstract, date, source, and DOI links for each paper.
+Reranking uses the cross-encoder model in `RERANK_MODEL` (default: `mixedbread-ai/mxbai-rerank-base-v1`).
 
 ### Fetch Papers
 
@@ -340,6 +345,7 @@ By default, data is stored in `~/.paperfind/`:
 | `EMBEDDING_PROVIDER` | Embedding provider: `openai`, `ollama`, or `huggingface` (default: `openai`) |
 | `EMBEDDING_MODEL` | Model name (provider-specific defaults apply) |
 | `OLLAMA_BASE_URL` | Ollama server URL (default: `http://localhost:11434`) |
+| `RERANK_MODEL` | Cross-encoder rerank model (default: `mixedbread-ai/mxbai-rerank-base-v1`) |
 
 ## Embedding Providers
 

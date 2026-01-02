@@ -26,6 +26,7 @@ from paperfind.config import (
 )
 from paperfind.embeddings import get_embeddings
 from paperfind.search.formatting import format_document
+from paperfind.search.utils import check_vector_store, warn_if_empty
 
 # Configuration
 ZOTERO_COLLECTION = "zotero_all"
@@ -67,6 +68,7 @@ def search(
         List of matching documents
     """
     vectordb = get_vectordb(source)
+    warn_if_empty(vectordb, source)
 
     search_kwargs = {"k": k}
     if project_id is not None and source == "zotero":
@@ -93,6 +95,7 @@ def search_with_scores(
         List of (document, score) tuples
     """
     vectordb = get_vectordb(source)
+    warn_if_empty(vectordb, source)
     results = vectordb.similarity_search_with_score(query, k=k)
     return results
 
@@ -155,6 +158,9 @@ def run_search(
     project_id: Optional[int] = None,
 ) -> None:
     """Run semantic search with parsed parameters."""
+    if not check_vector_store(source):
+        return
+
     if rag:
         print(f"\nAnswering question using RAG ({source})...\n")
         answer = rag_query(query, k=num_results, source=source)

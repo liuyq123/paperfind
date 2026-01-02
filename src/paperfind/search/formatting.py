@@ -11,6 +11,7 @@ def format_document(
     score: Optional[float] = None,
     similar_to: Optional[str] = None,
     show_score_as_similarity: bool = False,
+    score_label: Optional[str] = None,
 ) -> str:
     """
     Format a document for console display.
@@ -21,6 +22,7 @@ def format_document(
         score: Optional similarity/distance score
         similar_to: Optional title of the paper this is similar to
         show_score_as_similarity: If True, convert score to similarity percentage
+        score_label: Optional label to display for the score
 
     Returns:
         Formatted string for console output
@@ -30,7 +32,9 @@ def format_document(
     # Header line with rank and score
     header = f"#{rank}"
     if score is not None:
-        if show_score_as_similarity:
+        if score_label:
+            header += f" ({score_label}: {score:.4f})"
+        elif show_score_as_similarity:
             similarity = 1 / (1 + score)
             header += f" (similarity: {similarity:.2%})"
         else:
@@ -81,6 +85,8 @@ def format_markdown_recommendation(
     score: float,
     doc: Document,
     similar_to: str,
+    score_label: Optional[str] = None,
+    show_score_as_similarity: bool = True,
 ) -> str:
     """
     Format a single recommendation as markdown.
@@ -91,6 +97,8 @@ def format_markdown_recommendation(
         score: Distance score
         doc: The document
         similar_to: Title of the Zotero paper this is similar to
+        score_label: Optional label to display for the score
+        show_score_as_similarity: If True, convert score to similarity percentage
 
     Returns:
         Markdown formatted string
@@ -115,16 +123,25 @@ def format_markdown_recommendation(
         else:
             doi_link = f"https://doi.org/{doi}"
 
-    similarity = 1 / (1 + score)
+    if show_score_as_similarity:
+        similarity = 1 / (1 + score)
+        score_line = f"**Similarity:** {similarity:.1%} to *{similar_to}*"
+    else:
+        label = score_label or "Score"
+        score_line = f"**{label}:** {score:.4f}"
 
     lines = [
         f"## {rank}. {title}",
         f"",
-        f"**Similarity:** {similarity:.1%} to *{similar_to}*",
+        score_line,
         f"",
         f"**Authors:** {authors}",
         f"",
     ]
+
+    if not show_score_as_similarity:
+        lines.append(f"**Similar to:** *{similar_to}*")
+        lines.append(f"")
 
     if pub_date:
         lines.append(f"**Date:** {pub_date} | **Source:** {source}")

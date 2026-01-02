@@ -58,7 +58,11 @@ def run_digest(
     print(f"\n{'='*50}")
     print("Step 3: Generating recommendations")
     print(f"{'='*50}")
-    recommendations = get_recommendations(k=num_recommendations, collection=collection)
+    recommendations, rerank_used = get_recommendations(
+        k=num_recommendations,
+        collection=collection,
+        return_rerank_used=True,
+    )
 
     if not recommendations:
         print("No recommendations found. Make sure you have synced your Zotero library.")
@@ -67,7 +71,7 @@ def run_digest(
     print(f"Generated {len(recommendations)} recommendations")
 
     # Step 4: Render HTML
-    html = render_digest(recommendations, today)
+    html = render_digest(recommendations, today, rerank=rerank_used)
 
     # Step 5: Send or print
     if dry_run:

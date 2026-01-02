@@ -24,13 +24,18 @@ def _is_valid_url(url: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def render_digest(recommendations: List[Tuple], digest_date: date) -> str:
+def render_digest(
+    recommendations: List[Tuple],
+    digest_date: date,
+    rerank: bool = True,
+) -> str:
     """
     Render recommendations as an HTML email.
 
     Args:
         recommendations: List of (doi, (score, doc, zotero_title)) tuples
         digest_date: Date of the digest
+        rerank: If True, scores are rerank scores (not vector similarity)
 
     Returns:
         HTML string
@@ -54,7 +59,11 @@ def render_digest(recommendations: List[Tuple], digest_date: date) -> str:
         doi_link = _get_doi_link(doi)
         if not _is_valid_url(doi_link):
             doi_link = ""
-        similarity = 1 / (1 + score)
+        if rerank:
+            score_line = f"Rerank score {score:.4f}"
+        else:
+            similarity = 1 / (1 + score)
+            score_line = f"{similarity:.0%} similar"
 
         title_display = escape(title)
         authors_display = escape(authors)
@@ -76,7 +85,7 @@ def render_digest(recommendations: List[Tuple], digest_date: date) -> str:
         paper_html = f"""
         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #4285f4;">
             <div style="font-size: 12px; color: #5f6368; margin-bottom: 8px;">
-                #{rank} &bull; {similarity:.0%} similar to <em>{zotero_title_short}{'...' if len(zotero_title_display) > 50 else ''}</em>
+                #{rank} &bull; {score_line} &bull; similar to <em>{zotero_title_short}{'...' if len(zotero_title_display) > 50 else ''}</em>
             </div>
             <div style="font-size: 16px; font-weight: 600; color: #202124; margin-bottom: 8px;">
                 {title_html}

@@ -28,6 +28,7 @@ dependencies = [
     "langchain-chroma>=0.1.0",
     "chromadb>=0.4.0",
     "openai>=1.0.0",
+    "sentence-transformers>=2.2.0",
 ]
 
 [project.optional-dependencies]
@@ -41,12 +42,10 @@ ollama = [
 ]
 huggingface = [
     "langchain-huggingface>=0.0.1",
-    "sentence-transformers>=2.2.0",
 ]
 all-embeddings = [
     "langchain-ollama>=0.1.0",
     "langchain-huggingface>=0.0.1",
-    "sentence-transformers>=2.2.0",
 ]
 
 [project.scripts]

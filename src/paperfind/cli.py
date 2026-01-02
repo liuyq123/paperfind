@@ -67,6 +67,24 @@ def main():
         "--collection", type=str, help="Base recommendations on a specific Zotero collection"
     )
     rec_parser.add_argument("-o", "--output", type=str, help="Save recommendations to markdown file")
+    rec_parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help="Rerank recommendations with a cross-encoder (default)",
+    )
+    rec_parser.add_argument(
+        "--no-rerank",
+        dest="rerank",
+        action="store_false",
+        help="Disable reranking",
+    )
+    rec_parser.add_argument(
+        "--rerank-candidates",
+        type=int,
+        default=50,
+        help="Number of top candidates to rerank (default: 50)",
+    )
+    rec_parser.set_defaults(rerank=True)
 
     # Search command
     search_parser = subparsers.add_parser("search", help="Semantic search across papers")
@@ -137,6 +155,8 @@ def main():
             num_results=args.num_results,
             collection=args.collection,
             output=args.output,
+            rerank=args.rerank,
+            rerank_candidates=args.rerank_candidates,
         )
 
     elif args.command == "search":
