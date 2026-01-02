@@ -2,8 +2,10 @@
 
 import sqlite3
 import time
+from pathlib import Path
 
-from paperfind.config import DAILY_PAPERS_DB, CHROMA_STORE_DIR, EMBEDDING_MODEL
+from paperfind.config import DAILY_PAPERS_DB, get_chroma_store_dir
+from paperfind.embeddings import get_embeddings
 
 DEFAULT_BATCH_SIZE = 100
 
@@ -39,11 +41,10 @@ def upsert_vectors_for_dois(dois: list[str], batch_size: int = DEFAULT_BATCH_SIZ
         return 0
 
     try:
-        from langchain_openai import OpenAIEmbeddings
         from langchain_chroma import Chroma
     except ImportError:
-        print("    Error: langchain packages not installed")
-        print("    Run: pip install langchain-openai langchain-chroma")
+        print("    Error: langchain-chroma not installed")
+        print("    Run: pip install langchain-chroma")
         return 0
 
     print("\n[Vectors] Updating vector embeddings for new papers...")
@@ -53,10 +54,11 @@ def upsert_vectors_for_dois(dois: list[str], batch_size: int = DEFAULT_BATCH_SIZ
     cur = conn.cursor()
 
     total_docs = 0
-    embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, chunk_size=50)
+    chroma_dir = get_chroma_store_dir()
+    embeddings = get_embeddings()
     vectordb = Chroma(
         embedding_function=embeddings,
-        persist_directory=CHROMA_STORE_DIR,
+        persist_directory=chroma_dir,
     )
 
     for i in range(0, len(dois), batch_size):
@@ -80,25 +82,45 @@ def upsert_vectors_for_dois(dois: list[str], batch_size: int = DEFAULT_BATCH_SIZ
         total_docs += len(docs)
 
     conn.close()
-    print(f"    Upserted {total_docs} documents into {CHROMA_STORE_DIR}/")
+    print(f"    Upserted {total_docs} documents into {chroma_dir}/")
     return total_docs
 
 
 def rebuild_vectors() -> None:
     """Rebuild the vector database from SQLite."""
+    import shutil
+
     print("\n[Vectors] Rebuilding vector embeddings...")
 
     try:
-        from langchain_openai import OpenAIEmbeddings
         from langchain_chroma import Chroma
     except ImportError:
-        print("    Error: langchain packages not installed")
-        print("    Run: pip install langchain-openai langchain-chroma")
+        print("    Error: langchain-chroma not installed")
+        print("    Run: pip install langchain-chroma")
+        return
+
+    # Check if database exists before proceeding
+    if not Path(DAILY_PAPERS_DB).exists():
+        print("    Error: No papers database found. Run 'paperfind fetch' first.")
         return
 
     conn = sqlite3.connect(DAILY_PAPERS_DB)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
+
+    # Check if works table exists
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='works'")
+    if not cur.fetchone():
+        conn.close()
+        print("    Error: No papers in database. Run 'paperfind fetch' first.")
+        return
+
+    # Now safe to clear existing vector store
+    chroma_dir = get_chroma_store_dir()
+    if Path(chroma_dir).exists():
+        shutil.rmtree(chroma_dir)
+        print(f"    Cleared existing store at {chroma_dir}/")
+
     cur.execute("SELECT doi, title, authors, abstract, created_date, type, source FROM works")
 
     docs = _build_documents(cur.fetchall())
@@ -111,7 +133,7 @@ def rebuild_vectors() -> None:
 
     print(f"    Embedding {len(docs)} documents...")
 
-    embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, chunk_size=50)
+    embeddings = get_embeddings()
 
     batch_size = DEFAULT_BATCH_SIZE
     vectordb = None
@@ -129,7 +151,7 @@ def rebuild_vectors() -> None:
                     vectordb = Chroma.from_documents(
                         documents=batch,
                         embedding=embeddings,
-                        persist_directory=CHROMA_STORE_DIR,
+                        persist_directory=chroma_dir,
                     )
                 else:
                     vectordb.add_documents(batch)
@@ -144,4 +166,4 @@ def rebuild_vectors() -> None:
         else:
             print(f"    Failed after {max_retries} retries, skipping batch")
 
-    print(f"    Done! Vector store saved to {CHROMA_STORE_DIR}/")
+    print(f"    Done! Vector store saved to {chroma_dir}/")

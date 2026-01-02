@@ -5,9 +5,9 @@ from typing import List
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain_openai import OpenAIEmbeddings
 
-from paperfind.config import EMBEDDING_MODEL, ZOTERO_VECTORS_DIR
+from paperfind.config import get_zotero_vectors_dir
+from paperfind.embeddings import get_embeddings
 
 from .db import get_conn
 
@@ -17,11 +17,12 @@ CHROMA_COLLECTION = "zotero_all"
 
 def get_vectordb() -> Chroma:
     """Get or create ChromaDB vector store."""
-    Path(ZOTERO_VECTORS_DIR).mkdir(parents=True, exist_ok=True)
-    embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+    vectors_dir = get_zotero_vectors_dir()
+    Path(vectors_dir).mkdir(parents=True, exist_ok=True)
+    embeddings = get_embeddings()
     vectordb = Chroma(
         embedding_function=embeddings,
-        persist_directory=ZOTERO_VECTORS_DIR,
+        persist_directory=vectors_dir,
         collection_name=CHROMA_COLLECTION,
     )
     return vectordb

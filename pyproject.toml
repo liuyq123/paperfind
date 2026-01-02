@@ -36,6 +36,18 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+ollama = [
+    "langchain-ollama>=0.1.0",
+]
+huggingface = [
+    "langchain-huggingface>=0.0.1",
+    "sentence-transformers>=2.2.0",
+]
+all-embeddings = [
+    "langchain-ollama>=0.1.0",
+    "langchain-huggingface>=0.0.1",
+    "sentence-transformers>=2.2.0",
+]
 
 [project.scripts]
 paperfind = "paperfind.cli:main"

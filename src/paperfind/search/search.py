@@ -16,15 +16,15 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from langchain_chroma import Chroma
 
 from paperfind.config import (
-    CHROMA_STORE_DIR,
-    ZOTERO_VECTORS_DIR,
-    EMBEDDING_MODEL,
+    get_chroma_store_dir,
+    get_zotero_vectors_dir,
     LLM_MODEL,
 )
+from paperfind.embeddings import get_embeddings
 from paperfind.search.formatting import format_document
 
 # Configuration
@@ -33,18 +33,18 @@ ZOTERO_COLLECTION = "zotero_all"
 
 def get_vectordb(source: str = "daily_papers") -> Chroma:
     """Get the appropriate vector database based on source."""
-    embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+    embeddings = get_embeddings()
 
     if source == "zotero":
         return Chroma(
             embedding_function=embeddings,
-            persist_directory=ZOTERO_VECTORS_DIR,
+            persist_directory=get_zotero_vectors_dir(),
             collection_name=ZOTERO_COLLECTION,
         )
     else:
         return Chroma(
             embedding_function=embeddings,
-            persist_directory=CHROMA_STORE_DIR,
+            persist_directory=get_chroma_store_dir(),
         )
 
 

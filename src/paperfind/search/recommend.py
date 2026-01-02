@@ -15,16 +15,30 @@ from datetime import date
 from pathlib import Path
 from typing import List, Dict, Set
 
-from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 
-from paperfind.config import (
-    CHROMA_STORE_DIR,
-    ZOTERO_VECTORS_DIR,
-    ZOTERO_DB,
-    EMBEDDING_MODEL,
-)
+from paperfind.config import get_chroma_store_dir, ZOTERO_DB
+from paperfind.embeddings import get_embeddings
 from paperfind.search.formatting import format_document, format_markdown_recommendation
+
+
+def _check_zotero_db() -> bool:
+    """Check if Zotero database exists and has required tables."""
+    if not Path(ZOTERO_DB).exists():
+        print("Error: Zotero database not found. Run 'paperfind sync' first.")
+        return False
+
+    conn = sqlite3.connect(ZOTERO_DB)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'")
+    has_items = cur.fetchone() is not None
+    conn.close()
+
+    if not has_items:
+        print("Error: No Zotero items found. Run 'paperfind sync' first.")
+        return False
+
+    return True
 
 
 def get_project_id_by_name(collection_name: str) -> int:
@@ -42,6 +56,9 @@ def get_project_id_by_name(collection_name: str) -> int:
 
 def get_zotero_papers(collection: str = None) -> List[Dict]:
     """Get papers from Zotero database."""
+    if not _check_zotero_db():
+        return []
+
     conn = sqlite3.connect(ZOTERO_DB)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
@@ -67,8 +84,18 @@ def get_zotero_papers(collection: str = None) -> List[Dict]:
 
 def get_zotero_dois() -> Set[str]:
     """Get all DOIs from Zotero to exclude from recommendations."""
+    if not Path(ZOTERO_DB).exists():
+        return set()
+
     conn = sqlite3.connect(ZOTERO_DB)
     cur = conn.cursor()
+
+    # Check if items table exists
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'")
+    if not cur.fetchone():
+        conn.close()
+        return set()
+
     cur.execute("SELECT doi FROM items WHERE doi IS NOT NULL")
     dois = {row[0].lower() for row in cur.fetchall() if row[0]}
     conn.close()
@@ -95,10 +122,10 @@ def get_recommendations(
     existing_dois = get_zotero_dois()
 
     # Load the daily papers vector store
-    embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+    embeddings = get_embeddings()
     vectordb = Chroma(
         embedding_function=embeddings,
-        persist_directory=CHROMA_STORE_DIR,
+        persist_directory=get_chroma_store_dir(),
     )
 
     # Collect recommendations with scores

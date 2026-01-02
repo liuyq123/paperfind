@@ -337,3 +337,58 @@ By default, data is stored in `~/.paperfind/`:
 | `EMAIL_FROM` | From address for digest emails |
 | `EMAIL_TO` | Comma-separated list of digest recipients |
 | `PAPERFIND_DATA_DIR` | Custom data directory (optional) |
+| `EMBEDDING_PROVIDER` | Embedding provider: `openai`, `ollama`, or `huggingface` (default: `openai`) |
+| `EMBEDDING_MODEL` | Model name (provider-specific defaults apply) |
+| `OLLAMA_BASE_URL` | Ollama server URL (default: `http://localhost:11434`) |
+
+## Embedding Providers
+
+Paperfind supports multiple embedding providers for flexibility and local inference.
+
+### OpenAI (default)
+
+```bash
+# Uses OpenAI API (requires OPENAI_API_KEY)
+export EMBEDDING_PROVIDER=openai
+export EMBEDDING_MODEL=text-embedding-3-small  # default
+```
+
+### Ollama (local)
+
+Run embeddings locally using Ollama:
+
+```bash
+# Install the optional dependency
+pip install paperfind[ollama]
+
+# Configure
+export EMBEDDING_PROVIDER=ollama
+export EMBEDDING_MODEL=nomic-embed-text  # default
+export OLLAMA_BASE_URL=http://localhost:11434  # optional
+
+# Make sure Ollama is running and has the model
+ollama pull nomic-embed-text
+```
+
+### HuggingFace (local)
+
+Run embeddings locally using sentence-transformers:
+
+```bash
+# Install the optional dependency
+pip install paperfind[huggingface]
+
+# Configure
+export EMBEDDING_PROVIDER=huggingface
+export EMBEDDING_MODEL=all-MiniLM-L6-v2  # default
+```
+
+### Switching Providers
+
+Each provider/model combination uses a separate vector store directory (e.g., `chroma_store_ollama_nomic-embed-text/`). When you switch providers or models, you need to rebuild your embeddings:
+
+```bash
+# After changing EMBEDDING_PROVIDER or EMBEDDING_MODEL
+paperfind fetch --rebuild-vectors
+paperfind sync  # to rebuild Zotero vectors
+```
