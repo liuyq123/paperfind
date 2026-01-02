@@ -12,8 +12,8 @@ from paperfind.db import (
     qualify_table,
     table_exists,
 )
-from paperfind.embeddings import get_embeddings
 from paperfind.logging import get_logger
+from paperfind.vectorstore import get_vector_store, get_vector_store_backend
 
 logger = get_logger(__name__)
 
@@ -50,24 +50,18 @@ def upsert_vectors_for_dois(dois: List[str], batch_size: int = DEFAULT_BATCH_SIZ
     if not dois:
         return 0
 
-    try:
-        from langchain_chroma import Chroma
-    except ImportError:
-        logger.error("langchain-chroma not installed. Run: pip install langchain-chroma")
-        return 0
-
     logger.info("[Vectors] Updating vector embeddings for new papers...")
+
+    try:
+        vectordb = get_vector_store()
+    except (ImportError, ValueError) as exc:
+        logger.error(str(exc))
+        return 0
 
     conn = get_conn(DAILY_SCHEMA)
     cur = conn.cursor()
 
     total_docs = 0
-    chroma_dir = get_chroma_store_dir()
-    embeddings = get_embeddings()
-    vectordb = Chroma(
-        embedding_function=embeddings,
-        persist_directory=chroma_dir,
-    )
 
     for i in range(0, len(dois), batch_size):
         chunk = dois[i : i + batch_size]
@@ -86,12 +80,12 @@ def upsert_vectors_for_dois(dois: List[str], batch_size: int = DEFAULT_BATCH_SIZ
         if not docs:
             continue
 
-        ids = [doc.metadata["doi"] for doc in docs]
+        ids = [str(doc.metadata["doi"]) for doc in docs]
         vectordb.add_documents(docs, ids=ids)
         total_docs += len(docs)
 
     conn.close()
-    logger.info(f"    Upserted {total_docs} documents into {chroma_dir}/")
+    logger.info(f"    Upserted {total_docs} documents into vector store")
     return total_docs
 
 
@@ -100,12 +94,6 @@ def rebuild_vectors() -> None:
     import shutil
 
     logger.info("[Vectors] Rebuilding vector embeddings...")
-
-    try:
-        from langchain_chroma import Chroma
-    except ImportError:
-        logger.error("langchain-chroma not installed. Run: pip install langchain-chroma")
-        return
 
     # Check if database exists before proceeding (SQLite only)
     if not is_postgres() and not Path(DAILY_PAPERS_DB).exists():
@@ -125,11 +113,12 @@ def rebuild_vectors() -> None:
         logger.error("No papers in database. Run 'paperfind fetch' first.")
         return
 
-    # Now safe to clear existing vector store
-    chroma_dir = get_chroma_store_dir()
-    if Path(chroma_dir).exists():
-        shutil.rmtree(chroma_dir)
-        logger.debug(f"Cleared existing store at {chroma_dir}/")
+    backend = get_vector_store_backend()
+    if backend == "chroma":
+        chroma_dir = get_chroma_store_dir()
+        if Path(chroma_dir).exists():
+            shutil.rmtree(chroma_dir)
+            logger.debug(f"Cleared existing store at {chroma_dir}/")
 
     table = qualify_table(DAILY_SCHEMA, "works")
     cur.execute(
@@ -146,10 +135,14 @@ def rebuild_vectors() -> None:
 
     logger.info(f"    Embedding {len(docs)} documents...")
 
-    embeddings = get_embeddings()
-
     batch_size = DEFAULT_BATCH_SIZE
-    vectordb = None
+    try:
+        vectordb = get_vector_store()
+    except (ImportError, ValueError) as exc:
+        logger.error(str(exc))
+        return
+    if backend == "pgvector":
+        vectordb.delete()
 
     for i in range(0, len(docs), batch_size):
         batch = docs[i : i + batch_size]
@@ -160,14 +153,8 @@ def rebuild_vectors() -> None:
         max_retries = 5
         for attempt in range(max_retries):
             try:
-                if vectordb is None:
-                    vectordb = Chroma.from_documents(
-                        documents=batch,
-                        embedding=embeddings,
-                        persist_directory=chroma_dir,
-                    )
-                else:
-                    vectordb.add_documents(batch)
+                ids = [str(doc.metadata["doi"]) for doc in batch]
+                vectordb.add_documents(batch, ids=ids)
                 break
             except Exception as e:
                 if "rate_limit" in str(e).lower() or "429" in str(e):
@@ -179,4 +166,7 @@ def rebuild_vectors() -> None:
         else:
             logger.error(f"Failed after {max_retries} retries, skipping batch")
 
-    logger.info(f"    Done! Vector store saved to {chroma_dir}/")
+    if backend == "chroma":
+        logger.info(f"    Done! Vector store saved to {chroma_dir}/")
+    else:
+        logger.info("    Done! Vector store saved to Postgres (pgvector)")

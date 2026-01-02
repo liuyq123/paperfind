@@ -1,39 +1,47 @@
 """Shared utilities for search-related modules."""
 
-from pathlib import Path
 from typing import Any
 
-from paperfind.config import get_chroma_store_dir, get_zotero_vectors_dir
+from paperfind.db import is_postgres
 from paperfind.logging import get_logger
+from paperfind.vectorstore import get_vector_store_backend, vector_store_exists
 
 logger = get_logger(__name__)
 
 
 def check_vector_store(source: str = "daily_papers") -> bool:
     """Check if the vector store exists for the given source."""
-    if source == "zotero":
-        store_dir = Path(get_zotero_vectors_dir())
-        if not store_dir.exists():
+    backend = get_vector_store_backend()
+    if backend == "pgvector" and not is_postgres():
+        logger.error("pgvector backend requires PAPERFIND_DB_URL to be set.")
+        return False
+
+    if not vector_store_exists(source):
+        if source == "zotero":
             logger.error("No Zotero embeddings found. Run 'paperfind sync' first.")
-            return False
-    else:
-        store_dir = Path(get_chroma_store_dir())
-        if not store_dir.exists():
+        else:
             logger.error("No paper embeddings found. Run 'paperfind fetch --rebuild-vectors' first.")
-            return False
+        return False
     return True
 
 
 def warn_if_empty(vectordb: Any, source: str = "daily_papers") -> None:
     """Warn if the vector store exists but has no documents."""
-    collection = getattr(vectordb, "_collection", None)
-    if collection is None:
-        return
+    count = None
+    if hasattr(vectordb, "count"):
+        try:
+            count = vectordb.count()
+        except Exception:
+            count = None
 
-    try:
-        count = collection.count()
-    except Exception:
-        return
+    if count is None:
+        collection = getattr(vectordb, "_collection", None)
+        if collection is None:
+            return
+        try:
+            count = collection.count()
+        except Exception:
+            return
 
     if count == 0:
         if source == "zotero":

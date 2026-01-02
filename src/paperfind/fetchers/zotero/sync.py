@@ -21,6 +21,8 @@ from .api import (
     fetch_items_for_project,
     resolve_collection_name_to_key,
 )
+from paperfind.db import ZOTERO_SCHEMA, qualify_table
+
 from .db import get_conn, get_or_create_project, init_db, replace_project_items
 from .vector import rebuild_vectors_for_project
 
@@ -104,7 +106,8 @@ def rebuild_all_vectors() -> None:
     """Rebuild vectors for all projects."""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, name FROM projects")
+    table = qualify_table(ZOTERO_SCHEMA, "projects")
+    cur.execute(f"SELECT id, name FROM {table}")
     projects = cur.fetchall()
     conn.close()
 
@@ -112,7 +115,9 @@ def rebuild_all_vectors() -> None:
         logger.warning("No projects found. Run sync first.")
         return
 
-    for project_id, name in projects:
+    for row in projects:
+        project_id = row["id"]
+        name = row["name"]
         logger.info(f"Rebuilding vectors for '{name}' (project_id={project_id})...")
         num_docs = rebuild_vectors_for_project(project_id)
         logger.info(f"  Built {num_docs} embeddings")

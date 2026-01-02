@@ -15,10 +15,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from paperfind.config import get_chroma_store_dir, ZOTERO_DB
+from paperfind.config import ZOTERO_DB
 from paperfind.db import (
     ZOTERO_SCHEMA,
     get_conn,
@@ -27,11 +26,11 @@ from paperfind.db import (
     qualify_table,
     table_exists,
 )
-from paperfind.embeddings import get_embeddings
 from paperfind.logging import get_logger
 from paperfind.rerank import get_rerank_model, rerank_pairs
 from paperfind.search.formatting import format_document, format_markdown_recommendation
 from paperfind.search.utils import check_vector_store
+from paperfind.vectorstore import get_vector_store
 
 logger = get_logger(__name__)
 
@@ -215,11 +214,7 @@ def get_recommendations(
     existing_dois = get_zotero_dois()
 
     # Load the daily papers vector store
-    embeddings = get_embeddings()
-    vectordb = Chroma(
-        embedding_function=embeddings,
-        persist_directory=get_chroma_store_dir(),
-    )
+    vectordb = get_vector_store()
 
     # Collect recommendations with scores
     recommendations = {}  # doi -> (score, doc, zotero_title, query_text)

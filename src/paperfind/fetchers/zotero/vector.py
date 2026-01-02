@@ -1,32 +1,21 @@
 """Vector database functions for Zotero sync."""
 
-from pathlib import Path
 from typing import List
 
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from paperfind.config import get_zotero_vectors_dir
 from paperfind.db import ZOTERO_SCHEMA, placeholder, qualify_table
-from paperfind.embeddings import get_embeddings
+from paperfind.logging import get_logger
+from paperfind.vectorstore import get_vector_store
 
 from .db import get_conn
 
-# ChromaDB collection name
-CHROMA_COLLECTION = "zotero_all"
+logger = get_logger(__name__)
 
 
-def get_vectordb() -> Chroma:
-    """Get or create ChromaDB vector store."""
-    vectors_dir = get_zotero_vectors_dir()
-    Path(vectors_dir).mkdir(parents=True, exist_ok=True)
-    embeddings = get_embeddings()
-    vectordb = Chroma(
-        embedding_function=embeddings,
-        persist_directory=vectors_dir,
-        collection_name=CHROMA_COLLECTION,
-    )
-    return vectordb
+def get_vectordb():
+    """Get or create vector store."""
+    return get_vector_store("zotero")
 
 
 def build_docs_for_project(project_id: int) -> List[Document]:
@@ -79,13 +68,18 @@ def build_docs_for_project(project_id: int) -> List[Document]:
 
 def rebuild_vectors_for_project(project_id: int) -> int:
     """Rebuild vector embeddings for a project."""
-    vectordb = get_vectordb()
+    try:
+        vectordb = get_vectordb()
+    except (ImportError, ValueError) as exc:
+        logger.error(str(exc))
+        return 0
 
     # Delete existing vectors for this project
     vectordb.delete(where={"project_id": project_id})
 
     docs = build_docs_for_project(project_id)
     if docs:
-        vectordb.add_documents(docs)
+        ids = [str(doc.metadata["item_id"]) for doc in docs]
+        vectordb.add_documents(docs, ids=ids)
 
     return len(docs)

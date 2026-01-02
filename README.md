@@ -21,7 +21,6 @@ A paper recommendation system that discovers relevant papers and preprints based
   - [Semantic Search](#semantic-search)
 - [Data Storage](#data-storage)
   - [What Happens on Repeated Runs](#what-happens-on-repeated-runs)
-  - [Database Schemas](#database-schemas)
 - [Embedding Providers](#embedding-providers)
   - [OpenAI (default)](#openai-default)
   - [Ollama (local)](#ollama-local)
@@ -62,7 +61,7 @@ pip install paperfind
 ```
 
 ```bash
-# Optional: Postgres backend
+# Optional: Postgres + pgvector backend
 pip install paperfind[postgres]
 ```
 
@@ -85,6 +84,12 @@ Edit `~/.paperfind/.env` and fill in your keys and settings.
 ### Environment Variables
 
 See `.env.example` for a complete list with inline comments describing each variable.
+To use pgvector, set `PAPERFIND_VECTOR_STORE=pgvector`, ensure `PAPERFIND_DB_URL` is set,
+and enable the extension in your database:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
 
 ### Step 2: Verify configuration
 
@@ -270,9 +275,10 @@ Project structure is documented in `src/README.md`.
 
 ## Data Storage
 
-By default, data is stored in `~/.paperfind/` using SQLite. To use Postgres, install
-`paperfind[postgres]` and set `PAPERFIND_DB_URL` in your `.env`. Postgres uses one
-database with two schemas (`daily`, `zotero`). Vector stores still live in `~/.paperfind/`.
+By default, data is stored in `~/.paperfind/` using SQLite and Chroma. To use Postgres,
+install `paperfind[postgres]` and set `PAPERFIND_DB_URL` in your `.env`. Postgres uses one
+database with two schemas (`daily`, `zotero`). To store embeddings in Postgres, set
+`PAPERFIND_VECTOR_STORE=pgvector` (otherwise Chroma remains the default).
 
 | File/Directory | Created By | Description |
 |----------------|------------|-------------|
@@ -293,29 +299,7 @@ database with two schemas (`daily`, `zotero`). Vector stores still live in `~/.p
 | `paperfind recommend` | Read-only. Queries existing databases. Creates output file only if `-o` specified. |
 | `paperfind search` | Read-only. Queries existing vector stores. |
 
-### Database Schemas
-
-**SQLite (default)**
-
-**daily_papers.db** (table: `works`)
-- `doi` (PRIMARY KEY) - Paper identifier
-- `title`, `authors`, `abstract` - Paper metadata
-- `created_date` - Publication date
-- `type` - Article type (journal-article, preprint, etc.)
-- `source` - Where it was fetched from (crossref, biorxiv, arxiv, etc.)
-
-**zotero_meta.db** (tables: `projects`, `items`, `tags`)
-- `projects` - Zotero collections/libraries synced
-- `items` - Papers with metadata (zotero_key, title, authors, abstract, DOI, date, URL)
-- `tags` - Research tags for organization
-
-**Postgres (optional)**
-
-**Schema `daily`** (table: `works`)
-- Same columns as `daily_papers.db`
-
-**Schema `zotero`** (tables: `projects`, `items`, `tags`)
-- Same tables/columns as `zotero_meta.db`
+For database schema details, see [src/README.md](src/README.md#database-schemas)
 
 ## Embedding Providers
 
