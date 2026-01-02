@@ -17,7 +17,10 @@ from paperfind.digest.email import send_email
 from paperfind.digest.template import render_digest
 from paperfind.fetchers.fetch_papers import fetch_all
 from paperfind.fetchers.vector import rebuild_vectors
+from paperfind.logging import get_logger
 from paperfind.search.recommend import get_recommendations
+
+logger = get_logger(__name__)
 
 
 def run_digest(
@@ -41,23 +44,23 @@ def run_digest(
 
     if not skip_fetch:
         # Step 1: Fetch new papers
-        print(f"\n{'='*50}")
-        print(f"Step 1: Fetching papers from last {days} day(s)")
-        print(f"{'='*50}")
+        logger.info("=" * 50)
+        logger.info(f"Step 1: Fetching papers from last {days} day(s)")
+        logger.info("=" * 50)
         fetch_all(days=days)
 
         # Step 2: Rebuild vector embeddings
-        print(f"\n{'='*50}")
-        print("Step 2: Rebuilding vector embeddings")
-        print(f"{'='*50}")
+        logger.info("=" * 50)
+        logger.info("Step 2: Rebuilding vector embeddings")
+        logger.info("=" * 50)
         rebuild_vectors()
     else:
-        print("Skipping fetch, using existing papers...")
+        logger.info("Skipping fetch, using existing papers...")
 
     # Step 3: Generate recommendations
-    print(f"\n{'='*50}")
-    print("Step 3: Generating recommendations")
-    print(f"{'='*50}")
+    logger.info("=" * 50)
+    logger.info("Step 3: Generating recommendations")
+    logger.info("=" * 50)
     recommendations, rerank_used = get_recommendations(
         k=num_recommendations,
         collection=collection,
@@ -65,28 +68,27 @@ def run_digest(
     )
 
     if not recommendations:
-        print("No recommendations found. Make sure you have synced your Zotero library.")
+        logger.warning("No recommendations found. Make sure you have synced your Zotero library.")
         return
 
-    print(f"Generated {len(recommendations)} recommendations")
+    logger.info(f"Generated {len(recommendations)} recommendations")
 
     # Step 4: Render HTML
     html = render_digest(recommendations, today, rerank=rerank_used)
 
     # Step 5: Send or print
     if dry_run:
-        print(f"\n{'='*50}")
-        print("Dry run - HTML output:")
-        print(f"{'='*50}\n")
+        logger.info("=" * 50)
+        logger.info("Dry run - HTML output:")
+        logger.info("=" * 50)
         print(html)
     else:
-        print(f"\n{'='*50}")
-        print("Step 4: Sending email")
-        print(f"{'='*50}")
+        logger.info("=" * 50)
+        logger.info("Step 4: Sending email")
+        logger.info("=" * 50)
 
         if not EMAIL_TO:
-            print("Error: EMAIL_TO not set in .env")
-            print("Use --dry-run to preview without sending")
+            logger.error("EMAIL_TO not set in .env. Use --dry-run to preview without sending.")
             return
 
         to_addresses = [addr.strip() for addr in EMAIL_TO.split(",") if addr.strip()]
@@ -94,4 +96,4 @@ def run_digest(
 
         send_email(subject=subject, html_body=html, to_addresses=to_addresses)
 
-    print("\nDigest complete!")
+    logger.info("Digest complete!")

@@ -10,9 +10,9 @@ Usage:
     paperfind fetch --rebuild-vectors  # Also rebuild vector embeddings
 """
 
-from datetime import date, timedelta
 import time
-from typing import Dict, List, Optional
+from datetime import date, timedelta
+from typing import Dict, List, Optional, Tuple
 
 from paperfind.config import DAILY_PAPERS_DB
 from paperfind.fetchers.db import init_db, upsert_work
@@ -20,16 +20,20 @@ from paperfind.fetchers.sources.arxiv import ARXIV_CATEGORIES, fetch_arxiv
 from paperfind.fetchers.sources.biorxiv import BIORXIV_CATEGORIES, fetch_biorxiv
 from paperfind.fetchers.sources.crossref import fetch_crossref
 from paperfind.fetchers.vector import rebuild_vectors, upsert_vectors_for_dois
+from paperfind.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 # ============ Main ============
+
 
 def fetch_all(
     days: int = 1,
     sources: Optional[List[str]] = None,
     biorxiv_category: Optional[str] = None,
     medrxiv_category: Optional[str] = None,
-) -> tuple[Dict[str, int], List[str]]:
+) -> Tuple[Dict[str, int], List[str]]:
     """
     Fetch papers from all sources.
 
@@ -51,7 +55,7 @@ def fetch_all(
 
     # CrossRef
     if "crossref" in sources:
-        print("\n[CrossRef] Fetching journal articles and preprints...")
+        logger.info("[CrossRef] Fetching journal articles and preprints...")
         crossref_papers = []
 
         for d in range(days):
@@ -66,11 +70,11 @@ def fetch_all(
         conn.commit()
 
         counts["crossref"] = len(crossref_papers)
-        print(f"    Stored {len(crossref_papers)} papers")
+        logger.info(f"    Stored {len(crossref_papers)} papers")
 
     # bioRxiv
     if "biorxiv" in sources:
-        print("\n[bioRxiv] Fetching preprints...")
+        logger.info("[bioRxiv] Fetching preprints...")
         papers = fetch_biorxiv(
             start_date,
             end_date,
@@ -83,11 +87,11 @@ def fetch_all(
         conn.commit()
 
         counts["biorxiv"] = len(papers)
-        print(f"    Stored {len(papers)} preprints")
+        logger.info(f"    Stored {len(papers)} preprints")
 
     # medRxiv
     if "medrxiv" in sources:
-        print("\n[medRxiv] Fetching preprints...")
+        logger.info("[medRxiv] Fetching preprints...")
         papers = fetch_biorxiv(
             start_date,
             end_date,
@@ -100,17 +104,17 @@ def fetch_all(
         conn.commit()
 
         counts["medrxiv"] = len(papers)
-        print(f"    Stored {len(papers)} preprints")
+        logger.info(f"    Stored {len(papers)} preprints")
 
     # arXiv
     if "arxiv" in sources:
-        print("\n[arXiv] Fetching preprints...")
+        logger.info("[arXiv] Fetching preprints...")
         arxiv_papers = []
 
         for category in ARXIV_CATEGORIES:
             papers = fetch_arxiv(category, days=days)
             arxiv_papers.extend(papers)
-            print(f"    {category}: {len(papers)} papers")
+            logger.debug(f"    {category}: {len(papers)} papers")
             time.sleep(1)  # Rate limiting
 
         for paper in arxiv_papers:
@@ -119,7 +123,7 @@ def fetch_all(
         conn.commit()
 
         counts["arxiv"] = len(arxiv_papers)
-        print(f"    Total: {len(arxiv_papers)} preprints")
+        logger.info(f"    Total: {len(arxiv_papers)} preprints")
 
     conn.close()
     return counts, fetched_dois
@@ -138,9 +142,9 @@ def run_fetch(
         rebuild_vectors()
         return
 
-    print(f"{'='*50}")
-    print(f"Fetching papers from last {days} day(s)")
-    print(f"{'='*50}")
+    logger.info("=" * 50)
+    logger.info(f"Fetching papers from last {days} day(s)")
+    logger.info("=" * 50)
 
     counts, fetched_dois = fetch_all(
         days=days,
@@ -149,14 +153,14 @@ def run_fetch(
         medrxiv_category=medrxiv_category,
     )
 
-    print(f"\n{'='*50}")
-    print("Summary:")
+    logger.info("=" * 50)
+    logger.info("Summary:")
     total = 0
     for source, count in counts.items():
-        print(f"  {source}: {count} papers")
+        logger.info(f"  {source}: {count} papers")
         total += count
-    print(f"  Total: {total} papers stored in {DAILY_PAPERS_DB}")
-    print(f"{'='*50}")
+    logger.info(f"  Total: {total} papers stored in {DAILY_PAPERS_DB}")
+    logger.info("=" * 50)
 
     if rebuild_vectors_flag:
         rebuild_vectors()

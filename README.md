@@ -1,6 +1,32 @@
 # Paperfind
 
-A paper recommendation system that discovers relevant papers and preprints based on your Zotero library. It fetches metadata from CrossRef, bioRxiv, medRxiv, and arXiv, then uses semantic search to recommend papers similar to your existing research interests.
+A paper recommendation system that discovers relevant papers and preprints based on your Zotero library. It fetches metadata from CrossRef, bioRxiv, medRxiv, and arXiv, then uses semantic search and cross-encoder reranking to recommend papers similar to your existing research interests.
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+  - [From Source (Recommended)](#from-source-recommended)
+  - [Using pip](#using-pip)
+- [Configuration](#configuration)
+  - [Step 1: Create your `.env` file](#step-1-create-your-env-file)
+  - [Environment Variables](#environment-variables)
+  - [Step 2: Verify configuration](#step-2-verify-configuration)
+- [Usage](#usage)
+  - [Quick Start: Get Today's Recommendations](#quick-start-get-todays-recommendations)
+  - [Sync Zotero Library](#sync-zotero-library)
+  - [Get Recommendations](#get-recommendations)
+  - [Fetch Papers](#fetch-papers)
+  - [Email Digest](#email-digest)
+  - [Semantic Search](#semantic-search)
+- [Data Storage](#data-storage)
+  - [What Happens on Repeated Runs](#what-happens-on-repeated-runs)
+  - [Database Schemas](#database-schemas)
+- [Embedding Providers](#embedding-providers)
+  - [OpenAI (default)](#openai-default)
+  - [Ollama (local)](#ollama-local)
+  - [HuggingFace (local)](#huggingface-local)
+  - [Switching Providers](#switching-providers)
 
 ## Features
 
@@ -16,7 +42,7 @@ A paper recommendation system that discovers relevant papers and preprints based
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/liuyq123/paperfind.git
 cd paperfind
 
 # Install in editable mode
@@ -35,14 +61,10 @@ paperfind --help
 pip install paperfind
 ```
 
-### Dependencies
-
-The package will automatically install:
-- requests
-- python-dotenv
-- langchain-core, langchain-openai, langchain-chroma
-- chromadb
-- openai
+```bash
+# Optional: Postgres backend
+pip install paperfind[postgres]
+```
 
 ## Configuration
 
@@ -54,26 +76,15 @@ Create a `.env` file in `~/.paperfind/` (recommended) or your current working di
 # Create the data directory
 mkdir -p ~/.paperfind
 
-# Create the .env file
-nano ~/.paperfind/.env
+# Copy the example .env file and edit it
+cp .env.example ~/.paperfind/.env
 ```
 
-Add the following content:
+Edit `~/.paperfind/.env` and fill in your keys and settings.
 
-```
-OPENAI_API_KEY=sk-...
-ZOTERO_API_KEY=...
-ZOTERO_USER_ID=...
-CROSSREF_EMAIL=your_email@example.com
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USER=your_smtp_user
-SMTP_PASSWORD=your_smtp_password
-EMAIL_FROM=paperfind@example.com
-EMAIL_TO=you@example.com,teammate@example.com
-```
+### Environment Variables
 
-`EMAIL_TO` accepts a comma-separated list of recipient addresses.
+See `.env.example` for a complete list with inline comments describing each variable.
 
 ### Step 2: Verify configuration
 
@@ -82,16 +93,6 @@ paperfind config
 ```
 
 This shows your data directory path. Your `.env` file should be in that directory or your current working directory.
-
-### Custom data directory
-
-To use a custom location for all data:
-
-```bash
-export PAPERFIND_DATA_DIR=/path/to/your/data
-```
-
-Add this to your shell profile (`.bashrc`, `.zshrc`, etc.) to make it permanent.
 
 ## Usage
 
@@ -147,6 +148,7 @@ paperfind recommend --no-rerank
 
 The markdown file includes title, authors, abstract, date, source, and DOI links for each paper.
 Reranking uses the cross-encoder model in `RERANK_MODEL` (default: `mixedbread-ai/mxbai-rerank-base-v1`).
+Rerank scores are raw cross-encoder scores where higher is better.
 
 ### Fetch Papers
 
@@ -264,42 +266,20 @@ paperfind search "What methods are used for ultra-large library screening?" --ra
 | `--scores` | Show similarity scores |
 | `--project-id` | Filter by Zotero project ID |
 
-## Project Structure
-
-```
-paperfind/
-├── pyproject.toml            # Package configuration
-├── README.md
-├── src/
-│   └── paperfind/            # Main package
-│       ├── __init__.py
-│       ├── cli.py            # Command-line interface
-│       ├── config.py         # Configuration and paths
-│       ├── fetchers/         # Paper fetching modules
-│       │   ├── db.py
-│       │   ├── fetch_papers.py
-│       │   ├── vector.py
-│       │   └── zotero/
-│       │       ├── api.py
-│       │       ├── db.py
-│       │       ├── sync.py
-│       │       └── vector.py
-│       └── search/           # Search and recommendation
-│           ├── recommend.py
-│           └── search.py
-└── notebooks/                # Jupyter notebooks (optional)
-```
+Project structure is documented in `src/README.md`.
 
 ## Data Storage
 
-By default, data is stored in `~/.paperfind/`:
+By default, data is stored in `~/.paperfind/` using SQLite. To use Postgres, install
+`paperfind[postgres]` and set `PAPERFIND_DB_URL` in your `.env`. Postgres uses one
+database with two schemas (`daily`, `zotero`). Vector stores still live in `~/.paperfind/`.
 
 | File/Directory | Created By | Description |
 |----------------|------------|-------------|
-| `daily_papers.db` | `paperfind fetch` | SQLite database of harvested papers from CrossRef, bioRxiv, medRxiv, arXiv |
-| `zotero_meta.db` | `paperfind sync` | SQLite database of your Zotero library (projects, items, tags) |
-| `chroma_store/` | `paperfind fetch --rebuild-vectors` | ChromaDB vector embeddings for daily papers |
-| `zotero_vectors/` | `paperfind sync` | ChromaDB vector embeddings for Zotero items |
+| `daily_papers.db` | `paperfind fetch` | SQLite database (default) of harvested papers from CrossRef, bioRxiv, medRxiv, arXiv |
+| `zotero_meta.db` | `paperfind sync` | SQLite database (default) of your Zotero library (projects, items, tags) |
+| `chroma_store_<provider>_<model>/` | `paperfind fetch --rebuild-vectors` | ChromaDB vector embeddings for daily papers |
+| `zotero_vectors_<provider>_<model>/` | `paperfind sync` | ChromaDB vector embeddings for Zotero items |
 | `.env` | Manual | Optional: API keys (can also be in current directory) |
 
 ### What Happens on Repeated Runs
@@ -315,6 +295,8 @@ By default, data is stored in `~/.paperfind/`:
 
 ### Database Schemas
 
+**SQLite (default)**
+
 **daily_papers.db** (table: `works`)
 - `doi` (PRIMARY KEY) - Paper identifier
 - `title`, `authors`, `abstract` - Paper metadata
@@ -327,25 +309,13 @@ By default, data is stored in `~/.paperfind/`:
 - `items` - Papers with metadata (zotero_key, title, authors, abstract, DOI, date, URL)
 - `tags` - Research tags for organization
 
-## Environment Variables
+**Postgres (optional)**
 
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key for embeddings and LLM |
-| `ZOTERO_API_KEY` | Zotero API key for library sync |
-| `ZOTERO_USER_ID` | Your Zotero user ID |
-| `CROSSREF_EMAIL` | Email for CrossRef API (polite pool) |
-| `SMTP_HOST` | SMTP server hostname |
-| `SMTP_PORT` | SMTP server port |
-| `SMTP_USER` | SMTP username |
-| `SMTP_PASSWORD` | SMTP password |
-| `EMAIL_FROM` | From address for digest emails |
-| `EMAIL_TO` | Comma-separated list of digest recipients |
-| `PAPERFIND_DATA_DIR` | Custom data directory (optional) |
-| `EMBEDDING_PROVIDER` | Embedding provider: `openai`, `ollama`, or `huggingface` (default: `openai`) |
-| `EMBEDDING_MODEL` | Model name (provider-specific defaults apply) |
-| `OLLAMA_BASE_URL` | Ollama server URL (default: `http://localhost:11434`) |
-| `RERANK_MODEL` | Cross-encoder rerank model (default: `mixedbread-ai/mxbai-rerank-base-v1`) |
+**Schema `daily`** (table: `works`)
+- Same columns as `daily_papers.db`
+
+**Schema `zotero`** (tables: `projects`, `items`, `tags`)
+- Same tables/columns as `zotero_meta.db`
 
 ## Embedding Providers
 

@@ -1,11 +1,15 @@
 """bioRxiv/medRxiv fetcher."""
 
 from datetime import date
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import requests
 
 from paperfind.config import BIORXIV_CATEGORIES
+from paperfind.logging import get_logger
+from paperfind.types import PaperDict
+
+logger = get_logger(__name__)
 
 BIORXIV_API = "https://api.biorxiv.org/details"
 
@@ -15,7 +19,7 @@ def fetch_biorxiv(
     end_date: date,
     server: str = "biorxiv",
     category: Optional[str] = None,
-) -> List[Dict]:
+) -> List[PaperDict]:
     """Fetch preprints from bioRxiv or medRxiv.
 
     Args:
@@ -27,7 +31,7 @@ def fetch_biorxiv(
     Returns:
         List of paper dictionaries
     """
-    papers = []
+    papers: List[PaperDict] = []
     cursor = 0
     interval = f"{start_date}/{end_date}"
 
@@ -39,7 +43,7 @@ def fetch_biorxiv(
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as e:
-            print(f"    Error fetching {server}: {e}")
+            logger.error(f"Error fetching {server}: {e}")
             break
 
         collection = data.get("collection", [])

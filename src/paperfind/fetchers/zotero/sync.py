@@ -14,6 +14,7 @@ from paperfind.config import (
     ZOTERO_LIBRARY_TYPE,
     ZOTERO_USER_ID,
 )
+from paperfind.logging import get_logger
 
 from .api import (
     fetch_collections,
@@ -22,6 +23,8 @@ from .api import (
 )
 from .db import get_conn, get_or_create_project, init_db, replace_project_items
 from .vector import rebuild_vectors_for_project
+
+logger = get_logger(__name__)
 
 
 def sync_project(
@@ -64,12 +67,12 @@ def sync_project(
         collection_key=collection_key,
     )
 
-    print(f"Fetched {len(items)} items from Zotero")
+    logger.info(f"Fetched {len(items)} items from Zotero")
     item_ids = replace_project_items(project_id, items)
-    print(f"Stored {len(item_ids)} items in database (project_id={project_id})")
+    logger.info(f"Stored {len(item_ids)} items in database (project_id={project_id})")
 
     num_docs = rebuild_vectors_for_project(project_id)
-    print(f"Built {num_docs} vector embeddings")
+    logger.info(f"Built {num_docs} vector embeddings")
 
     return project_id
 
@@ -77,7 +80,7 @@ def sync_project(
 def list_collections() -> None:
     """List all collections in the Zotero library."""
     if not ZOTERO_API_KEY or not ZOTERO_USER_ID:
-        print("Error: ZOTERO_API_KEY and ZOTERO_USER_ID must be set in .env")
+        logger.error("ZOTERO_API_KEY and ZOTERO_USER_ID must be set in .env")
         return
 
     collections = fetch_collections(
@@ -87,14 +90,14 @@ def list_collections() -> None:
     )
 
     if not collections:
-        print("No collections found in your Zotero library.")
+        logger.info("No collections found in your Zotero library.")
         return
 
-    print(f"\nFound {len(collections)} collections:\n")
+    logger.info(f"Found {len(collections)} collections:")
     for c in collections:
         name = c.get("data", {}).get("name", "Unknown")
         num_items = c.get("meta", {}).get("numItems", 0)
-        print(f"  - {name} ({num_items} items)")
+        logger.info(f"  - {name} ({num_items} items)")
 
 
 def rebuild_all_vectors() -> None:
@@ -106,13 +109,13 @@ def rebuild_all_vectors() -> None:
     conn.close()
 
     if not projects:
-        print("No projects found. Run sync first.")
+        logger.warning("No projects found. Run sync first.")
         return
 
     for project_id, name in projects:
-        print(f"\nRebuilding vectors for '{name}' (project_id={project_id})...")
+        logger.info(f"Rebuilding vectors for '{name}' (project_id={project_id})...")
         num_docs = rebuild_vectors_for_project(project_id)
-        print(f"  Built {num_docs} embeddings")
+        logger.info(f"  Built {num_docs} embeddings")
 
 
 def run_sync(collection: Optional[str], list_collections_flag: bool) -> None:
@@ -127,20 +130,18 @@ def run_sync(collection: Optional[str], list_collections_flag: bool) -> None:
     # Project name = collection name (or "whole library")
     project_name = collection if collection else "whole library"
 
-    print(f"\n{'='*60}")
-    print("Syncing Zotero Library")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("Syncing Zotero Library")
+    logger.info("=" * 60)
 
     if collection:
-        print(f"Collection: {collection}")
+        logger.info(f"Collection: {collection}")
     else:
-        print("Syncing entire library")
-
-    print()
+        logger.info("Syncing entire library")
 
     sync_project(
         project_name=project_name,
         collection_name=collection,
     )
 
-    print("\nSync complete!")
+    logger.info("Sync complete!")

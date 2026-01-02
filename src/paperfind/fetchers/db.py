@@ -1,40 +1,58 @@
 """Database helpers for paper fetchers."""
 
-from typing import Dict
-import sqlite3
-
-from paperfind.config import DAILY_PAPERS_DB
+from paperfind.db import DAILY_SCHEMA, get_conn, is_postgres, placeholders, qualify_table
+from paperfind.types import PaperDict
 
 
-def init_db() -> sqlite3.Connection:
+def init_db():
     """Initialize database with works table."""
-    DAILY_PAPERS_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DAILY_PAPERS_DB)
+    conn = get_conn(DAILY_SCHEMA)
     cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS works (
-            doi TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            authors TEXT,
-            abstract TEXT,
-            created_date DATE,
-            type TEXT,
-            source TEXT
-        );
-        """
-    )
+    table = qualify_table(DAILY_SCHEMA, "works")
+
+    if is_postgres():
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {DAILY_SCHEMA}")
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table} (
+                doi TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                authors TEXT,
+                abstract TEXT,
+                created_date DATE,
+                type TEXT,
+                source TEXT
+            );
+            """
+        )
+    else:
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table} (
+                doi TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                authors TEXT,
+                abstract TEXT,
+                created_date DATE,
+                type TEXT,
+                source TEXT
+            );
+            """
+        )
+
     conn.commit()
     return conn
 
 
-def upsert_work(conn: sqlite3.Connection, work: Dict) -> None:
+def upsert_work(conn, work: PaperDict) -> None:
     """Insert or update a work in the database."""
     cur = conn.cursor()
+    table = qualify_table(DAILY_SCHEMA, "works")
+    params = placeholders(7)
     cur.execute(
-        """
-        INSERT INTO works (doi, title, authors, abstract, created_date, type, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        f"""
+        INSERT INTO {table} (doi, title, authors, abstract, created_date, type, source)
+        VALUES ({params})
         ON CONFLICT(doi) DO UPDATE SET
             title = excluded.title,
             authors = excluded.authors,

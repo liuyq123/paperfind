@@ -1,8 +1,17 @@
 """Zotero API functions."""
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
+
+from paperfind.logging import get_logger
+
+logger = get_logger(__name__)
+
+# Type aliases for Zotero API responses
+ZoteroCollection = Dict[str, Any]
+ZoteroItem = Dict[str, Any]
+ZoteroItemRow = Dict[str, Any]
 
 
 def _zotero_base(library_id: str, library_type: str) -> str:
@@ -16,11 +25,11 @@ def fetch_collections(
     api_key: str,
     library_type: str = "user",
     limit: int = 100,
-) -> List[Dict]:
+) -> List[ZoteroCollection]:
     """Fetch all collections from Zotero library."""
     base = _zotero_base(library_id, library_type) + "/collections"
     headers = {"Zotero-API-Key": api_key}
-    collections: List[Dict] = []
+    collections: List[ZoteroCollection] = []
     start = 0
 
     while True:
@@ -61,12 +70,12 @@ def resolve_collection_name_to_key(
     if len(matches) == 1:
         return matches[0]["data"]["key"]
     elif len(matches) == 0:
-        print(f"No collection named '{collection_name}' found")
+        logger.warning(f"No collection named '{collection_name}' found")
         return None
     else:
-        print(f"Multiple collections named '{collection_name}' found:")
+        logger.warning(f"Multiple collections named '{collection_name}' found:")
         for c in matches:
-            print(f"  - key: {c['data']['key']}")
+            logger.warning(f"  - key: {c['data']['key']}")
         return None
 
 
@@ -76,11 +85,11 @@ def fetch_items_for_project(
     library_type: str = "user",
     collection_key: Optional[str] = None,
     limit: int = 100,
-) -> List[Dict]:
+) -> List[ZoteroItem]:
     """Fetch all items from Zotero library or collection."""
     root = _zotero_base(library_id, library_type)
     headers = {"Zotero-API-Key": api_key}
-    items: List[Dict] = []
+    items: List[ZoteroItem] = []
     start = 0
 
     while True:
@@ -110,7 +119,7 @@ def fetch_items_for_project(
     return items
 
 
-def zotero_item_to_row(item: Dict) -> Dict:
+def zotero_item_to_row(item: ZoteroItem) -> ZoteroItemRow:
     """Convert Zotero API item to database row."""
     data = item.get("data", {})
 

@@ -11,79 +11,100 @@ Usage:
     paperfind recommend --no-rerank                  # Disable reranking
 """
 
-import sqlite3
 from datetime import date
 from pathlib import Path
-from typing import Any, List, Dict, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 
 from paperfind.config import get_chroma_store_dir, ZOTERO_DB
+from paperfind.db import (
+    ZOTERO_SCHEMA,
+    get_conn,
+    is_postgres,
+    placeholder,
+    qualify_table,
+    table_exists,
+)
 from paperfind.embeddings import get_embeddings
+from paperfind.logging import get_logger
 from paperfind.rerank import get_rerank_model, rerank_pairs
 from paperfind.search.formatting import format_document, format_markdown_recommendation
 from paperfind.search.utils import check_vector_store
 
-Recommendation = Tuple[str, Tuple[float, Any, str]]
-RecommendationWithQuery = Tuple[str, Tuple[float, Any, str, str]]
+logger = get_logger(__name__)
+
+# Type aliases for recommendations
+Recommendation = Tuple[str, Tuple[float, Document, str]]
+RecommendationWithQuery = Tuple[str, Tuple[float, Document, str, str]]
 RecommendationList = List[Recommendation]
 RecommendationResult = Union[RecommendationList, Tuple[RecommendationList, bool]]
+
+# Type alias for Zotero paper dict
+ZoteroPaper = Dict[str, Any]
 
 
 def _check_zotero_db() -> bool:
     """Check if Zotero database exists and has required tables."""
-    if not Path(ZOTERO_DB).exists():
-        print("Error: Zotero database not found. Run 'paperfind sync' first.")
+    if not is_postgres() and not Path(ZOTERO_DB).exists():
+        logger.error("Zotero database not found. Run 'paperfind sync' first.")
         return False
 
-    conn = sqlite3.connect(ZOTERO_DB)
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'")
-    has_items = cur.fetchone() is not None
+    try:
+        conn = get_conn(ZOTERO_SCHEMA)
+    except Exception as exc:
+        logger.error(f"Failed to connect to Zotero database: {exc}")
+        return False
+
+    has_items = table_exists(conn, ZOTERO_SCHEMA, "items")
     conn.close()
 
     if not has_items:
-        print("Error: No Zotero items found. Run 'paperfind sync' first.")
+        logger.error("No Zotero items found. Run 'paperfind sync' first.")
         return False
 
     return True
 
 
-def get_project_id_by_name(collection_name: str) -> int:
+def get_project_id_by_name(collection_name: str) -> Optional[int]:
     """Look up project_id by collection name."""
-    conn = sqlite3.connect(ZOTERO_DB)
+    conn = get_conn(ZOTERO_SCHEMA)
     cur = conn.cursor()
+    table = qualify_table(ZOTERO_SCHEMA, "projects")
+    ph = placeholder()
     cur.execute(
-        "SELECT id FROM projects WHERE name = ? OR collection_name = ?",
+        f"SELECT id FROM {table} WHERE name = {ph} OR collection_name = {ph}",
         (collection_name, collection_name)
     )
     row = cur.fetchone()
     conn.close()
-    return row[0] if row else None
+    return row["id"] if row else None
 
 
-def get_zotero_papers(collection: str = None) -> List[Dict]:
+def get_zotero_papers(collection: Optional[str] = None) -> List[ZoteroPaper]:
     """Get papers from Zotero database."""
     if not _check_zotero_db():
         return []
 
-    conn = sqlite3.connect(ZOTERO_DB)
-    conn.row_factory = sqlite3.Row
+    conn = get_conn(ZOTERO_SCHEMA)
     cur = conn.cursor()
+    table = qualify_table(ZOTERO_SCHEMA, "items")
+    ph = placeholder()
 
     if collection:
         project_id = get_project_id_by_name(collection)
         if project_id:
             cur.execute(
-                "SELECT title, abstract, doi FROM items WHERE project_id = ?",
+                f"SELECT title, abstract, doi FROM {table} WHERE project_id = {ph}",
                 (project_id,)
             )
         else:
-            print(f"Collection '{collection}' not found.")
+            logger.warning(f"Collection '{collection}' not found.")
             conn.close()
             return []
     else:
-        cur.execute("SELECT title, abstract, doi FROM items")
+        cur.execute(f"SELECT title, abstract, doi FROM {table}")
 
     papers = [dict(row) for row in cur.fetchall()]
     conn.close()
@@ -92,20 +113,22 @@ def get_zotero_papers(collection: str = None) -> List[Dict]:
 
 def get_zotero_dois() -> Set[str]:
     """Get all DOIs from Zotero to exclude from recommendations."""
-    if not Path(ZOTERO_DB).exists():
+    if not is_postgres() and not Path(ZOTERO_DB).exists():
         return set()
 
-    conn = sqlite3.connect(ZOTERO_DB)
+    try:
+        conn = get_conn(ZOTERO_SCHEMA)
+    except Exception:
+        return set()
     cur = conn.cursor()
 
-    # Check if items table exists
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'")
-    if not cur.fetchone():
+    if not table_exists(conn, ZOTERO_SCHEMA, "items"):
         conn.close()
         return set()
 
-    cur.execute("SELECT doi FROM items WHERE doi IS NOT NULL")
-    dois = {row[0].lower() for row in cur.fetchall() if row[0]}
+    table = qualify_table(ZOTERO_SCHEMA, "items")
+    cur.execute(f"SELECT doi FROM {table} WHERE doi IS NOT NULL")
+    dois = {row["doi"].lower() for row in cur.fetchall() if row["doi"]}
     conn.close()
     return dois
 
@@ -135,15 +158,15 @@ def _rerank_recommendations(
     ]
 
     model_name = get_rerank_model()
-    print(f"Reranking {len(candidates)} candidates with {model_name}...")
+    logger.info(f"Reranking {len(candidates)} candidates with {model_name}...")
 
     try:
         scores = rerank_pairs(pairs, model=model_name)
     except ImportError as exc:
-        print(f"Rerank unavailable: {exc}")
+        logger.warning(f"Rerank unavailable: {exc}")
         return _strip_query(recommendations[:k]), False
     except Exception as exc:
-        print(f"Rerank failed: {exc}")
+        logger.error(f"Rerank failed: {exc}")
         return _strip_query(recommendations[:k]), False
 
     ranked = sorted(
@@ -162,7 +185,7 @@ def _rerank_recommendations(
 
 def get_recommendations(
     k: int = 10,
-    collection: str = None,
+    collection: Optional[str] = None,
     rerank: bool = True,
     rerank_candidates: int = 50,
     return_rerank_used: bool = False,
@@ -201,7 +224,7 @@ def get_recommendations(
     # Collect recommendations with scores
     recommendations = {}  # doi -> (score, doc, zotero_title, query_text)
 
-    print(f"Finding papers similar to {len(zotero_papers)} papers in your library...")
+    logger.info(f"Finding papers similar to {len(zotero_papers)} papers in your library...")
 
     candidate_k = max(k, rerank_candidates) if rerank else k
 
@@ -247,9 +270,9 @@ def get_recommendations(
 
 
 def format_markdown(
-    recommendations: List,
+    recommendations: RecommendationList,
     today: str,
-    collection: str = None,
+    collection: Optional[str] = None,
     rerank: bool = True,
 ) -> str:
     """Format recommendations as a markdown document."""
@@ -286,15 +309,15 @@ def format_markdown(
 
 def run_recommend(
     num_results: int = 10,
-    collection: str = None,
-    output: str = None,
+    collection: Optional[str] = None,
+    output: Optional[str] = None,
     rerank: bool = True,
     rerank_candidates: int = 50,
 ) -> None:
     """Run paper recommendations with parsed parameters."""
-    print(f"\n{'='*60}")
-    print("Paper Recommendations Based on Your Zotero Library")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("Paper Recommendations Based on Your Zotero Library")
+    logger.info("=" * 60)
 
     recommendations, rerank_used = get_recommendations(
         k=num_results,
@@ -305,10 +328,10 @@ def run_recommend(
     )
 
     if not recommendations:
-        print("\nNo recommendations found. Make sure you have:")
-        print("  1. Papers in your Zotero library (paperfind sync)")
-        print("  2. Fetched daily papers (paperfind fetch)")
-        print("  3. Built vector embeddings (paperfind fetch --rebuild-vectors)")
+        logger.warning("No recommendations found. Make sure you have:")
+        logger.warning("  1. Papers in your Zotero library (paperfind sync)")
+        logger.warning("  2. Fetched daily papers (paperfind fetch)")
+        logger.warning("  3. Built vector embeddings (paperfind fetch --rebuild-vectors)")
         return
 
     # Save to markdown file if output specified
@@ -318,10 +341,10 @@ def run_recommend(
 
         output_path = Path(output)
         output_path.write_text(markdown)
-        print(f"\nSaved {len(recommendations)} recommendations to {output}")
+        logger.info(f"Saved {len(recommendations)} recommendations to {output}")
     else:
         # Print to console
-        print(f"\nTop {len(recommendations)} recommendations:\n")
+        logger.info(f"Top {len(recommendations)} recommendations:")
         score_label = "Rerank score" if rerank_used else None
         show_similarity = not rerank_used
         for rank, (doi, (score, doc, zotero_title)) in enumerate(recommendations, 1):

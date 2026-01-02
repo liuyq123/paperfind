@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 DEFAULT_RERANK_MODEL = "mixedbread-ai/mxbai-rerank-base-v1"
 
@@ -19,7 +19,8 @@ def get_rerank_model() -> str:
 
 
 @lru_cache(maxsize=None)
-def _get_cross_encoder(model: str):
+def _get_cross_encoder(model: str) -> Any:
+    """Get or create a cached CrossEncoder instance."""
     try:
         from sentence_transformers import CrossEncoder
     except ImportError as exc:

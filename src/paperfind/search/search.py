@@ -10,7 +10,7 @@ Usage:
     paperfind search "your query" -k 10
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -25,8 +25,11 @@ from paperfind.config import (
     LLM_MODEL,
 )
 from paperfind.embeddings import get_embeddings
+from paperfind.logging import get_logger
 from paperfind.search.formatting import format_document
 from paperfind.search.utils import check_vector_store, warn_if_empty
+
+logger = get_logger(__name__)
 
 # Configuration
 ZOTERO_COLLECTION = "zotero_all"
@@ -82,7 +85,7 @@ def search_with_scores(
     query: str,
     k: int = 5,
     source: str = "daily_papers",
-) -> List[tuple]:
+) -> List[Tuple[Document, float]]:
     """
     Perform semantic search and return results with similarity scores.
 
@@ -162,11 +165,11 @@ def run_search(
         return
 
     if rag:
-        print(f"\nAnswering question using RAG ({source})...\n")
+        logger.info(f"Answering question using RAG ({source})...")
         answer = rag_query(query, k=num_results, source=source)
         print(answer)
     else:
-        print(f"\nSearching {source} for: {query}\n")
+        logger.info(f"Searching {source} for: {query}")
 
         if scores:
             results = search_with_scores(query, k=num_results, source=source)

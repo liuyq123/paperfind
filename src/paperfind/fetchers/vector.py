@@ -1,16 +1,26 @@
 """Vector store helpers for paper fetchers."""
-
-import sqlite3
 import time
 from pathlib import Path
+from typing import Any, List, Mapping, Sequence
 
 from paperfind.config import DAILY_PAPERS_DB, get_chroma_store_dir
+from paperfind.db import (
+    DAILY_SCHEMA,
+    get_conn,
+    is_postgres,
+    placeholders,
+    qualify_table,
+    table_exists,
+)
 from paperfind.embeddings import get_embeddings
+from paperfind.logging import get_logger
+
+logger = get_logger(__name__)
 
 DEFAULT_BATCH_SIZE = 100
 
 
-def _build_documents(rows: list[sqlite3.Row]) -> list:
+def _build_documents(rows: Sequence[Mapping[str, Any]]) -> List[Any]:
     docs = []
     try:
         from langchain_core.documents import Document
@@ -35,7 +45,7 @@ def _build_documents(rows: list[sqlite3.Row]) -> list:
     return docs
 
 
-def upsert_vectors_for_dois(dois: list[str], batch_size: int = DEFAULT_BATCH_SIZE) -> int:
+def upsert_vectors_for_dois(dois: List[str], batch_size: int = DEFAULT_BATCH_SIZE) -> int:
     """Upsert vector embeddings for specific DOIs."""
     if not dois:
         return 0
@@ -43,14 +53,12 @@ def upsert_vectors_for_dois(dois: list[str], batch_size: int = DEFAULT_BATCH_SIZ
     try:
         from langchain_chroma import Chroma
     except ImportError:
-        print("    Error: langchain-chroma not installed")
-        print("    Run: pip install langchain-chroma")
+        logger.error("langchain-chroma not installed. Run: pip install langchain-chroma")
         return 0
 
-    print("\n[Vectors] Updating vector embeddings for new papers...")
+    logger.info("[Vectors] Updating vector embeddings for new papers...")
 
-    conn = sqlite3.connect(DAILY_PAPERS_DB)
-    conn.row_factory = sqlite3.Row
+    conn = get_conn(DAILY_SCHEMA)
     cur = conn.cursor()
 
     total_docs = 0
@@ -62,13 +70,14 @@ def upsert_vectors_for_dois(dois: list[str], batch_size: int = DEFAULT_BATCH_SIZ
     )
 
     for i in range(0, len(dois), batch_size):
-        chunk = dois[i:i + batch_size]
-        placeholders = ",".join("?" for _ in chunk)
+        chunk = dois[i : i + batch_size]
+        placeholders_sql = placeholders(len(chunk))
+        table = qualify_table(DAILY_SCHEMA, "works")
         cur.execute(
             f"""
             SELECT doi, title, authors, abstract, created_date, type, source
-            FROM works
-            WHERE doi IN ({placeholders})
+            FROM {table}
+            WHERE doi IN ({placeholders_sql})
             """,
             chunk,
         )
@@ -82,56 +91,60 @@ def upsert_vectors_for_dois(dois: list[str], batch_size: int = DEFAULT_BATCH_SIZ
         total_docs += len(docs)
 
     conn.close()
-    print(f"    Upserted {total_docs} documents into {chroma_dir}/")
+    logger.info(f"    Upserted {total_docs} documents into {chroma_dir}/")
     return total_docs
 
 
 def rebuild_vectors() -> None:
-    """Rebuild the vector database from SQLite."""
+    """Rebuild the vector database from the papers database."""
     import shutil
 
-    print("\n[Vectors] Rebuilding vector embeddings...")
+    logger.info("[Vectors] Rebuilding vector embeddings...")
 
     try:
         from langchain_chroma import Chroma
     except ImportError:
-        print("    Error: langchain-chroma not installed")
-        print("    Run: pip install langchain-chroma")
+        logger.error("langchain-chroma not installed. Run: pip install langchain-chroma")
         return
 
-    # Check if database exists before proceeding
-    if not Path(DAILY_PAPERS_DB).exists():
-        print("    Error: No papers database found. Run 'paperfind fetch' first.")
+    # Check if database exists before proceeding (SQLite only)
+    if not is_postgres() and not Path(DAILY_PAPERS_DB).exists():
+        logger.error("No papers database found. Run 'paperfind fetch' first.")
         return
 
-    conn = sqlite3.connect(DAILY_PAPERS_DB)
-    conn.row_factory = sqlite3.Row
+    try:
+        conn = get_conn(DAILY_SCHEMA)
+    except Exception as exc:
+        logger.error(f"Failed to connect to database: {exc}")
+        return
+
     cur = conn.cursor()
 
-    # Check if works table exists
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='works'")
-    if not cur.fetchone():
+    if not table_exists(conn, DAILY_SCHEMA, "works"):
         conn.close()
-        print("    Error: No papers in database. Run 'paperfind fetch' first.")
+        logger.error("No papers in database. Run 'paperfind fetch' first.")
         return
 
     # Now safe to clear existing vector store
     chroma_dir = get_chroma_store_dir()
     if Path(chroma_dir).exists():
         shutil.rmtree(chroma_dir)
-        print(f"    Cleared existing store at {chroma_dir}/")
+        logger.debug(f"Cleared existing store at {chroma_dir}/")
 
-    cur.execute("SELECT doi, title, authors, abstract, created_date, type, source FROM works")
+    table = qualify_table(DAILY_SCHEMA, "works")
+    cur.execute(
+        f"SELECT doi, title, authors, abstract, created_date, type, source FROM {table}"
+    )
 
     docs = _build_documents(cur.fetchall())
 
     conn.close()
 
     if not docs:
-        print("    No documents to embed")
+        logger.warning("No documents to embed")
         return
 
-    print(f"    Embedding {len(docs)} documents...")
+    logger.info(f"    Embedding {len(docs)} documents...")
 
     embeddings = get_embeddings()
 
@@ -139,9 +152,9 @@ def rebuild_vectors() -> None:
     vectordb = None
 
     for i in range(0, len(docs), batch_size):
-        batch = docs[i:i + batch_size]
-        print(
-            f"    Batch {i//batch_size + 1}/{(len(docs)-1)//batch_size + 1} ({len(batch)} docs)"
+        batch = docs[i : i + batch_size]
+        logger.debug(
+            f"    Batch {i // batch_size + 1}/{(len(docs) - 1) // batch_size + 1} ({len(batch)} docs)"
         )
 
         max_retries = 5
@@ -158,12 +171,12 @@ def rebuild_vectors() -> None:
                 break
             except Exception as e:
                 if "rate_limit" in str(e).lower() or "429" in str(e):
-                    wait_time = (2 ** attempt) + 1
-                    print(f"    Rate limited. Waiting {wait_time}s before retry...")
+                    wait_time = (2**attempt) + 1
+                    logger.warning(f"Rate limited. Waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
                 else:
                     raise
         else:
-            print(f"    Failed after {max_retries} retries, skipping batch")
+            logger.error(f"Failed after {max_retries} retries, skipping batch")
 
-    print(f"    Done! Vector store saved to {chroma_dir}/")
+    logger.info(f"    Done! Vector store saved to {chroma_dir}/")

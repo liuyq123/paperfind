@@ -43,6 +43,9 @@ ollama = [
 huggingface = [
     "langchain-huggingface>=0.0.1",
 ]
+postgres = [
+    "psycopg[binary]>=3.1.0",
+]
 all-embeddings = [
     "langchain-ollama>=0.1.0",
     "langchain-huggingface>=0.0.1",

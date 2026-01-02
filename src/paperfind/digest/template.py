@@ -2,8 +2,13 @@
 
 from datetime import date
 from html import escape
-from typing import List, Tuple
+from typing import Any, List, Tuple
 from urllib.parse import urlparse
+
+from langchain_core.documents import Document
+
+# Type alias for recommendation tuple: (doi, (score, doc, zotero_title))
+Recommendation = Tuple[str, Tuple[float, Document, str]]
 
 
 def _get_doi_link(doi: str) -> str:
@@ -25,7 +30,7 @@ def _is_valid_url(url: str) -> bool:
 
 
 def render_digest(
-    recommendations: List[Tuple],
+    recommendations: List[Recommendation],
     digest_date: date,
     rerank: bool = True,
 ) -> str:

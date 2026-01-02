@@ -1,14 +1,18 @@
 """arXiv fetcher."""
 
-from datetime import date, timedelta
-from typing import Dict, List
-from urllib.parse import urlencode
 import time
 import xml.etree.ElementTree as ET
+from datetime import date, timedelta
+from typing import List
+from urllib.parse import urlencode
 
 import requests
 
 from paperfind.config import ARXIV_CATEGORIES
+from paperfind.logging import get_logger
+from paperfind.types import PaperDict
+
+logger = get_logger(__name__)
 
 ARXIV_API = "http://export.arxiv.org/api/query"
 ARXIV_NAMESPACES = {
@@ -22,9 +26,9 @@ MAX_PAGES = 10  # Safety limit: 1000 papers max per category
 REQUEST_DELAY_SECONDS = 3
 
 
-def fetch_arxiv(category: str, days: int = 7) -> List[Dict]:
+def fetch_arxiv(category: str, days: int = 7) -> List[PaperDict]:
     """Fetch papers from arXiv for a category with pagination."""
-    papers = []
+    papers: List[PaperDict] = []
     query = f"cat:{category}"
     cutoff_date = date.today() - timedelta(days=days)
     start = 0
@@ -45,7 +49,7 @@ def fetch_arxiv(category: str, days: int = 7) -> List[Dict]:
             resp.raise_for_status()
             root = ET.fromstring(resp.content)
         except (requests.RequestException, ET.ParseError) as e:
-            print(f"    Error fetching arXiv {category}: {e}")
+            logger.error(f"Error fetching arXiv {category}: {e}")
             break
 
         entries = root.findall("atom:entry", ARXIV_NAMESPACES)

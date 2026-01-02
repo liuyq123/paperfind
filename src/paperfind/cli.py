@@ -11,14 +11,33 @@ Usage:
 
 import argparse
 import sys
+from typing import Optional
 
 
-def main():
+def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         prog="paperfind",
         description="Paper recommendation system based on your Zotero library",
     )
+
+    # Global options
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose output with timestamps",
+    )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress non-essential output",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Set log level (default: INFO, or PAPERFIND_LOG_LEVEL env var)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Sync command
@@ -127,6 +146,17 @@ def main():
 
     args = parser.parse_args()
 
+    # Setup logging based on flags
+    from paperfind.logging import setup_logging
+
+    log_level: Optional[str] = args.log_level
+    if args.quiet:
+        log_level = "WARNING"
+    elif args.verbose and not log_level:
+        log_level = "DEBUG"
+
+    setup_logging(level=log_level, verbose=args.verbose)
+
     if args.command is None:
         parser.print_help()
         sys.exit(0)
@@ -173,13 +203,15 @@ def main():
 
     elif args.command == "config":
         from paperfind.config import DATA_DIR
+        from paperfind.logging import get_logger
 
+        logger = get_logger(__name__)
         if args.data_dir:
             print(DATA_DIR)
         else:
-            print(f"Data directory: {DATA_DIR}")
-            print(f"\nTo use a different location, set PAPERFIND_DATA_DIR environment variable.")
-            print(f"\nPlace your .env file in the data directory or current working directory.")
+            logger.info(f"Data directory: {DATA_DIR}")
+            logger.info("To use a different location, set PAPERFIND_DATA_DIR environment variable.")
+            logger.info("Place your .env file in the data directory or current working directory.")
 
     elif args.command == "digest":
         from paperfind.digest import run_digest

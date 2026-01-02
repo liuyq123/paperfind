@@ -7,6 +7,7 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 from paperfind.config import get_zotero_vectors_dir
+from paperfind.db import ZOTERO_SCHEMA, placeholder, qualify_table
 from paperfind.embeddings import get_embeddings
 
 from .db import get_conn
@@ -32,11 +33,14 @@ def build_docs_for_project(project_id: int) -> List[Document]:
     """Build LangChain documents from project items."""
     conn = get_conn()
     cur = conn.cursor()
+    items_table = qualify_table(ZOTERO_SCHEMA, "items")
+    tags_table = qualify_table(ZOTERO_SCHEMA, "tags")
+    ph = placeholder()
     cur.execute(
-        """
+        f"""
         SELECT id, zotero_key, title, abstract
-        FROM items
-        WHERE project_id = ?
+        FROM {items_table}
+        WHERE project_id = {ph}
         """,
         (project_id,),
     )
@@ -44,10 +48,14 @@ def build_docs_for_project(project_id: int) -> List[Document]:
 
     docs: List[Document] = []
 
-    for item_id, zotero_key, title, abstract in rows:
+    for row in rows:
+        item_id = row["id"]
+        zotero_key = row["zotero_key"]
+        title = row["title"]
+        abstract = row["abstract"]
         # Fetch tags
-        cur.execute("SELECT tag FROM tags WHERE item_id = ?", (item_id,))
-        tags = [r[0] for r in cur.fetchall()]
+        cur.execute(f"SELECT tag FROM {tags_table} WHERE item_id = {ph}", (item_id,))
+        tags = [r["tag"] for r in cur.fetchall()]
 
         parts = [title or ""]
         if abstract:

@@ -3,20 +3,24 @@
 import html
 import re
 from datetime import date
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 
 from paperfind.config import CROSSREF_EMAIL
+from paperfind.logging import get_logger
+from paperfind.types import PaperDict
+
+logger = get_logger(__name__)
 
 CROSSREF_API = "https://api.crossref.org/works"
 TOOL_NAME = "paperfind"
 TOOL_VERSION = "0.1"
 
 
-def fetch_crossref(target_date: date, type_filter: Optional[str] = None) -> List[Dict]:
+def fetch_crossref(target_date: date, type_filter: Optional[str] = None) -> List[PaperDict]:
     """Fetch papers from CrossRef for a specific date."""
-    papers = []
+    papers: List[PaperDict] = []
 
     if CROSSREF_EMAIL:
         user_agent = f"{TOOL_NAME}/{TOOL_VERSION} (mailto:{CROSSREF_EMAIL})"
@@ -40,7 +44,7 @@ def fetch_crossref(target_date: date, type_filter: Optional[str] = None) -> List
             resp.raise_for_status()
             msg = resp.json()["message"]
         except requests.RequestException as e:
-            print(f"    Error fetching CrossRef: {e}")
+            logger.error(f"Error fetching CrossRef: {e}")
             break
 
         items = msg.get("items", [])

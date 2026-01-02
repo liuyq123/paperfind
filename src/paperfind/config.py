@@ -52,39 +52,6 @@ def _get_model_suffix() -> str:
     return f"{provider}_{model}"
 
 
-def _migrate_legacy_store() -> None:
-    """Migrate legacy vector stores to new naming scheme (one-time migration).
-
-    Only migrates if the user is using the default provider and model (openai/text-embedding-3-small),
-    since we can't know what was used to create the old stores.
-    """
-    from paperfind.embeddings import get_embedding_model, get_embedding_provider
-
-    current_provider = get_embedding_provider()
-    current_model = get_embedding_model()
-
-    # Only migrate if using defaults - otherwise we can't safely assume
-    # what provider/model was used to create the old stores
-    if current_provider != "openai" or current_model != "text-embedding-3-small":
-        return
-
-    import shutil
-
-    old_chroma = DATA_DIR / "chroma_store"
-    new_chroma = DATA_DIR / "chroma_store_openai_text-embedding-3-small"
-
-    if old_chroma.exists() and not new_chroma.exists():
-        shutil.move(str(old_chroma), str(new_chroma))
-        print(f"Migrated {old_chroma} -> {new_chroma}")
-
-    old_zotero = DATA_DIR / "zotero_vectors"
-    new_zotero = DATA_DIR / "zotero_vectors_openai_text-embedding-3-small"
-
-    if old_zotero.exists() and not new_zotero.exists():
-        shutil.move(str(old_zotero), str(new_zotero))
-        print(f"Migrated {old_zotero} -> {new_zotero}")
-
-
 def get_chroma_store_dir() -> str:
     """Get the ChromaDB store directory for the current model."""
     return str(DATA_DIR / f"chroma_store_{_get_model_suffix()}")
@@ -94,13 +61,6 @@ def get_zotero_vectors_dir() -> str:
     """Get the Zotero vectors directory for the current model."""
     return str(DATA_DIR / f"zotero_vectors_{_get_model_suffix()}")
 
-
-# Run migration on import
-_migrate_legacy_store()
-
-# Legacy constants for backwards compatibility
-CHROMA_STORE_DIR = get_chroma_store_dir()
-ZOTERO_VECTORS_DIR = get_zotero_vectors_dir()
 
 # API Keys and settings
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

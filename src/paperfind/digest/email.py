@@ -1,17 +1,20 @@
 """SMTP email sending for digest."""
 
 import smtplib
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import List
 
 from paperfind.config import (
+    EMAIL_FROM,
     SMTP_HOST,
+    SMTP_PASSWORD,
     SMTP_PORT,
     SMTP_USER,
-    SMTP_PASSWORD,
-    EMAIL_FROM,
 )
+from paperfind.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def send_email(
@@ -54,4 +57,4 @@ def send_email(
         server.login(SMTP_USER, SMTP_PASSWORD)
         server.sendmail(EMAIL_FROM, to_addresses, msg.as_string())
 
-    print(f"Email sent to {', '.join(to_addresses)}")
+    logger.info(f"Email sent to {', '.join(to_addresses)}")
