@@ -125,6 +125,8 @@ def rebuild_all_vectors() -> None:
 
 def run_sync(collection: Optional[str], list_collections_flag: bool) -> None:
     """Run a Zotero sync with parsed parameters."""
+    import sys
+
     # Initialize database
     init_db()
 
@@ -144,9 +146,16 @@ def run_sync(collection: Optional[str], list_collections_flag: bool) -> None:
     else:
         logger.info("Syncing entire library")
 
-    sync_project(
-        project_name=project_name,
-        collection_name=collection,
-    )
+    try:
+        sync_project(
+            project_name=project_name,
+            collection_name=collection,
+        )
+    except ValueError as e:
+        logger.error(f"Sync failed: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Unexpected error during sync: {e}")
+        sys.exit(1)
 
     logger.info("Sync complete!")

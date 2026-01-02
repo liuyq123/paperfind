@@ -4,6 +4,8 @@ from typing import Optional
 
 from langchain_core.documents import Document
 
+from paperfind.documents import extract_title_and_abstract
+
 
 def format_document(
     doc: Document,
@@ -48,9 +50,7 @@ def format_document(
 
     lines.append("=" * 60)
 
-    # Extract title and abstract from content
-    content_lines = doc.page_content.split("\n")
-    title = content_lines[0]
+    title, abstract = extract_title_and_abstract(doc)
     if len(title) > 100:
         title = title[:100] + "..."
     lines.append(f"Title: {title}")
@@ -70,11 +70,11 @@ def format_document(
         lines.append(f"Source: {metadata['source']}")
 
     # Abstract preview
-    if len(content_lines) > 1:
-        abstract = " ".join(content_lines[1:])[:300]
-        if len(abstract) == 300:
-            abstract += "..."
-        lines.append(f"\nAbstract: {abstract}")
+    if abstract:
+        abstract_preview = " ".join(abstract.split())[:300]
+        if len(abstract_preview) == 300:
+            abstract_preview += "..."
+        lines.append(f"\nAbstract: {abstract_preview}")
 
     return "\n".join(lines)
 
@@ -103,16 +103,13 @@ def format_markdown_recommendation(
     Returns:
         Markdown formatted string
     """
-    content_lines = doc.page_content.split("\n")
-    title = content_lines[0]
+    title, abstract = extract_title_and_abstract(doc)
     authors = doc.metadata.get("authors", "Unknown")
     source = doc.metadata.get("source", "")
     pub_date = doc.metadata.get("created_date", "")
 
     # Get full abstract
-    abstract = ""
-    if len(content_lines) > 1:
-        abstract = " ".join(content_lines[1:]).strip()
+    abstract_text = " ".join(abstract.split()) if abstract else ""
 
     # Build DOI link
     doi_link = ""
@@ -153,10 +150,10 @@ def format_markdown_recommendation(
         lines.append(f"**Link:** [{doi}]({doi_link})")
         lines.append(f"")
 
-    if abstract:
+    if abstract_text:
         lines.append(f"**Abstract:**")
         lines.append(f"")
-        lines.append(f"> {abstract}")
+        lines.append(f"> {abstract_text}")
         lines.append(f"")
 
     lines.append(f"---")

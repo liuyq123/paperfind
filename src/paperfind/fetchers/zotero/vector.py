@@ -27,7 +27,7 @@ def build_docs_for_project(project_id: int) -> List[Document]:
     ph = placeholder()
     cur.execute(
         f"""
-        SELECT id, zotero_key, title, abstract
+        SELECT id, zotero_key, title, authors, abstract
         FROM {items_table}
         WHERE project_id = {ph}
         """,
@@ -41,6 +41,7 @@ def build_docs_for_project(project_id: int) -> List[Document]:
         item_id = row["id"]
         zotero_key = row["zotero_key"]
         title = row["title"]
+        authors = row["authors"]
         abstract = row["abstract"]
         # Fetch tags
         cur.execute(f"SELECT tag FROM {tags_table} WHERE item_id = {ph}", (item_id,))
@@ -59,6 +60,9 @@ def build_docs_for_project(project_id: int) -> List[Document]:
             "project_id": project_id,
             "item_id": item_id,
             "zotero_key": zotero_key,
+            "title": title,
+            "authors": authors,
+            "abstract": abstract,
         }
         docs.append(Document(page_content=page_content, metadata=metadata))
 

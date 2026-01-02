@@ -47,6 +47,10 @@ postgres = [
     "psycopg[binary]>=3.1.0",
     "pgvector>=0.2.5",
 ]
+api = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.23.0",
+]
 all-embeddings = [
     "langchain-ollama>=0.1.0",
     "langchain-huggingface>=0.0.1",

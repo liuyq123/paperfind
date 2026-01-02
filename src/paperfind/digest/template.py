@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 
 from langchain_core.documents import Document
 
+from paperfind.documents import extract_title_and_abstract
+
 # Type alias for recommendation tuple: (doi, (score, doc, zotero_title))
 Recommendation = Tuple[str, Tuple[float, Document, str]]
 
@@ -48,18 +50,17 @@ def render_digest(
     papers_html = []
 
     for rank, (doi, (score, doc, zotero_title)) in enumerate(recommendations, 1):
-        content_lines = doc.page_content.split("\n")
-        title = content_lines[0]
+        title, abstract = extract_title_and_abstract(doc)
         authors = doc.metadata.get("authors", "Unknown")
         source = doc.metadata.get("source", "")
         pub_date = doc.metadata.get("created_date", "")
 
         # Get abstract (truncate for email)
-        abstract = ""
-        if len(content_lines) > 1:
-            abstract = " ".join(content_lines[1:]).strip()
-            if len(abstract) > 300:
-                abstract = abstract[:300] + "..."
+        abstract_display = ""
+        if abstract:
+            abstract_display = " ".join(abstract.split())
+            if len(abstract_display) > 300:
+                abstract_display = abstract_display[:300] + "..."
 
         doi_link = _get_doi_link(doi)
         if not _is_valid_url(doi_link):
@@ -73,7 +74,7 @@ def render_digest(
         title_display = escape(title)
         authors_display = escape(authors)
         source_display = escape(source)
-        abstract_display = escape(abstract)
+        abstract_display = escape(abstract_display)
         zotero_title_display = zotero_title or ""
         zotero_title_short = zotero_title_display[:50]
         zotero_title_short = escape(zotero_title_short)

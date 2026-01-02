@@ -5,8 +5,10 @@ src/
 └── paperfind/            # Main package
     ├── __init__.py
     ├── cli.py            # Command-line interface
+    ├── api.py            # FastAPI REST API
     ├── config.py         # Configuration and paths
     ├── db.py             # Database abstraction (SQLite/Postgres)
+    ├── documents.py      # Document parsing utilities
     ├── embeddings.py     # Embedding provider support
     ├── logging.py        # Logging configuration
     ├── rerank.py         # Cross-encoder reranking
@@ -67,7 +69,18 @@ When `PAPERFIND_DB_URL` is set, data is stored in a single Postgres database wit
 | `daily` | `works` | Same columns as `daily_papers.db` |
 | `zotero` | `projects`, `items`, `tags` | Same as `zotero_meta.db` |
 
-### pgvector Embeddings (optional)
+### ChromaDB (default vector store)
+
+When using the default `PAPERFIND_VECTOR_STORE=chroma`, embeddings are stored in local directories:
+
+| Directory | Description |
+|-----------|-------------|
+| `chroma_store_<provider>_<model>/` | Embeddings for fetched papers |
+| `zotero_vectors_<provider>_<model>/` | Embeddings for Zotero items |
+
+ChromaDB stores data in SQLite files within these directories (`chroma.sqlite3`).
+
+### pgvector (optional vector store)
 
 When `PAPERFIND_VECTOR_STORE=pgvector`, embeddings are stored in Postgres tables:
 

@@ -14,7 +14,7 @@ from paperfind.types import PaperDict
 
 logger = get_logger(__name__)
 
-ARXIV_API = "http://export.arxiv.org/api/query"
+ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_NAMESPACES = {
     "atom": "http://www.w3.org/2005/Atom",
     "arxiv": "http://arxiv.org/schemas/atom",

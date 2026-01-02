@@ -36,7 +36,9 @@ def _build_documents(rows: Sequence[Mapping[str, Any]]) -> List[Any]:
 
         metadata = {
             "doi": row["doi"],
+            "title": title,
             "authors": row["authors"],
+            "abstract": abstract or None,
             "created_date": row["created_date"],
             "type": row["type"],
             "source": row["source"],

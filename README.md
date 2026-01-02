@@ -10,7 +10,6 @@ A paper recommendation system that discovers relevant papers and preprints based
   - [Using pip](#using-pip)
 - [Configuration](#configuration)
   - [Step 1: Create your `.env` file](#step-1-create-your-env-file)
-  - [Environment Variables](#environment-variables)
   - [Step 2: Verify configuration](#step-2-verify-configuration)
 - [Usage](#usage)
   - [Quick Start: Get Today's Recommendations](#quick-start-get-todays-recommendations)
@@ -19,13 +18,10 @@ A paper recommendation system that discovers relevant papers and preprints based
   - [Fetch Papers](#fetch-papers)
   - [Email Digest](#email-digest)
   - [Semantic Search](#semantic-search)
+  - [API Server (optional)](#api-server-optional)
+  - [Embedding Providers](#embedding-providers)
 - [Data Storage](#data-storage)
   - [What Happens on Repeated Runs](#what-happens-on-repeated-runs)
-- [Embedding Providers](#embedding-providers)
-  - [OpenAI (default)](#openai-default)
-  - [Ollama (local)](#ollama-local)
-  - [HuggingFace (local)](#huggingface-local)
-  - [Switching Providers](#switching-providers)
 
 ## Features
 
@@ -60,9 +56,21 @@ paperfind --help
 pip install paperfind
 ```
 
+#### Optional Dependencies
+
+| Extra | Install Command | Description |
+|-------|-----------------|-------------|
+| `ollama` | `pip install paperfind[ollama]` | Local embeddings via [Ollama](https://ollama.ai) |
+| `huggingface` | `pip install paperfind[huggingface]` | Local embeddings via sentence-transformers |
+| `all-embeddings` | `pip install paperfind[all-embeddings]` | Both Ollama and HuggingFace support |
+| `postgres` | `pip install paperfind[postgres]` | PostgreSQL + pgvector backend |
+| `api` | `pip install paperfind[api]` | FastAPI REST server |
+| `dev` | `pip install paperfind[dev]` | Development tools (pytest, black, ruff) |
+
+You can combine multiple extras:
+
 ```bash
-# Optional: Postgres + pgvector backend
-pip install paperfind[postgres]
+pip install paperfind[postgres,api,ollama]
 ```
 
 ## Configuration
@@ -79,13 +87,9 @@ mkdir -p ~/.paperfind
 cp .env.example ~/.paperfind/.env
 ```
 
-Edit `~/.paperfind/.env` and fill in your keys and settings.
+Edit `~/.paperfind/.env` and fill in your keys and settings. See `.env.example` for a complete list with inline comments describing each variable.
 
-### Environment Variables
-
-See `.env.example` for a complete list with inline comments describing each variable.
-To use pgvector, set `PAPERFIND_VECTOR_STORE=pgvector`, ensure `PAPERFIND_DB_URL` is set,
-and enable the extension in your database:
+To use pgvector, set `PAPERFIND_VECTOR_STORE=pgvector`, ensure `PAPERFIND_DB_URL` is set, and enable the extension in your database:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -261,17 +265,100 @@ paperfind search "active learning" -s zotero
 paperfind search "What methods are used for ultra-large library screening?" --rag
 ```
 
-**Options:**
+### API Server (optional)
 
-| Flag | Description |
-|------|-------------|
-| `-k`, `--num-results` | Number of results to return (default: 5) |
-| `-s`, `--source` | Data source: `daily_papers` or `zotero` |
-| `--rag` | Use RAG to answer the query as a question |
-| `--scores` | Show similarity scores |
-| `--project-id` | Filter by Zotero project ID |
+Run the REST API server:
+
+```bash
+pip install paperfind[api]
+uvicorn paperfind.api:app --reload
+```
+
+**Available Endpoints:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check |
+| GET | `/collections` | List Zotero collections |
+| GET | `/search?query=...` | Semantic search (supports `scores`, `rag`, `source` params) |
+| GET | `/papers` | List fetched papers (paginated) |
+| GET | `/recommend` | Get paper recommendations |
+| POST | `/sync` | Trigger Zotero sync (background job) |
+| POST | `/fetch` | Trigger paper fetching (background job) |
+| GET | `/jobs/{job_id}` | Check background job status |
+
+**Example usage:**
+
+```bash
+# Search papers
+curl "http://localhost:8000/search?query=machine+learning&k=5"
+
+# Get recommendations
+curl "http://localhost:8000/recommend?k=10"
+
+# Start a fetch job
+curl -X POST "http://localhost:8000/fetch?days=3"
+# Returns: {"job_id": "abc-123", "status": "pending", "job_type": "fetch"}
+
+# Check job status
+curl "http://localhost:8000/jobs/abc-123"
+```
+
+Interactive API docs available at `http://localhost:8000/docs`.
 
 Project structure is documented in `src/README.md`.
+
+### Embedding Providers
+
+Paperfind supports multiple embedding providers for flexibility and local inference.
+
+**OpenAI (default)**
+
+```bash
+# Uses OpenAI API (requires OPENAI_API_KEY)
+export EMBEDDING_PROVIDER=openai
+export EMBEDDING_MODEL=text-embedding-3-small  # default
+```
+
+**Ollama (local)**
+
+Run embeddings locally using Ollama:
+
+```bash
+# Install the optional dependency
+pip install paperfind[ollama]
+
+# Configure
+export EMBEDDING_PROVIDER=ollama
+export EMBEDDING_MODEL=nomic-embed-text  # default
+export OLLAMA_BASE_URL=http://localhost:11434  # optional
+
+# Make sure Ollama is running and has the model
+ollama pull nomic-embed-text
+```
+
+**HuggingFace (local)**
+
+Run embeddings locally using sentence-transformers:
+
+```bash
+# Install the optional dependency
+pip install paperfind[huggingface]
+
+# Configure
+export EMBEDDING_PROVIDER=huggingface
+export EMBEDDING_MODEL=all-MiniLM-L6-v2  # default
+```
+
+**Switching Providers**
+
+Each provider/model combination uses a separate vector store directory (e.g., `chroma_store_ollama_nomic-embed-text/`). When you switch providers or models, you need to rebuild your embeddings:
+
+```bash
+# After changing EMBEDDING_PROVIDER or EMBEDDING_MODEL
+paperfind fetch --rebuild-vectors
+paperfind sync  # to rebuild Zotero vectors
+```
 
 ## Data Storage
 
@@ -300,55 +387,3 @@ database with two schemas (`daily`, `zotero`). To store embeddings in Postgres, 
 | `paperfind search` | Read-only. Queries existing vector stores. |
 
 For database schema details, see [src/README.md](src/README.md#database-schemas)
-
-## Embedding Providers
-
-Paperfind supports multiple embedding providers for flexibility and local inference.
-
-### OpenAI (default)
-
-```bash
-# Uses OpenAI API (requires OPENAI_API_KEY)
-export EMBEDDING_PROVIDER=openai
-export EMBEDDING_MODEL=text-embedding-3-small  # default
-```
-
-### Ollama (local)
-
-Run embeddings locally using Ollama:
-
-```bash
-# Install the optional dependency
-pip install paperfind[ollama]
-
-# Configure
-export EMBEDDING_PROVIDER=ollama
-export EMBEDDING_MODEL=nomic-embed-text  # default
-export OLLAMA_BASE_URL=http://localhost:11434  # optional
-
-# Make sure Ollama is running and has the model
-ollama pull nomic-embed-text
-```
-
-### HuggingFace (local)
-
-Run embeddings locally using sentence-transformers:
-
-```bash
-# Install the optional dependency
-pip install paperfind[huggingface]
-
-# Configure
-export EMBEDDING_PROVIDER=huggingface
-export EMBEDDING_MODEL=all-MiniLM-L6-v2  # default
-```
-
-### Switching Providers
-
-Each provider/model combination uses a separate vector store directory (e.g., `chroma_store_ollama_nomic-embed-text/`). When you switch providers or models, you need to rebuild your embeddings:
-
-```bash
-# After changing EMBEDDING_PROVIDER or EMBEDDING_MODEL
-paperfind fetch --rebuild-vectors
-paperfind sync  # to rebuild Zotero vectors
-```
