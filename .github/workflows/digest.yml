@@ -2,8 +2,8 @@ name: Daily Paper Digest
 
 on:
   schedule:
-    # Run daily at 8 AM UTC (adjust timezone as needed)
-    - cron: '0 8 * * *'
+    # Run daily at 11:50 PM EST (4:50 AM UTC next day)
+    - cron: '50 4 * * *'
   workflow_dispatch:
     # Allow manual trigger from GitHub Actions UI
     inputs:
@@ -14,11 +14,28 @@ on:
       num_results:
         description: 'Number of recommendations'
         required: false
-        default: '10'
+        default: '100'
 
 jobs:
   digest:
     runs-on: ubuntu-latest
+    env:
+      PAPERFIND_DATA_DIR: ${{ github.workspace }}/.paperfind
+      # API keys
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+      ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
+      CROSSREF_EMAIL: ${{ secrets.CROSSREF_EMAIL }}
+      # Email settings
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO }}
+      # Optional: custom categories
+      ARXIV_CATEGORIES: ${{ secrets.ARXIV_CATEGORIES }}
+      BIORXIV_CATEGORIES: ${{ secrets.BIORXIV_CATEGORIES }}
 
     steps:
       - name: Checkout repository
@@ -34,23 +51,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
+      - name: Cache Paperfind data
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PAPERFIND_DATA_DIR }}
+          key: ${{ runner.os }}-paperfind-data-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-paperfind-data-
+
+      - name: Sync Zotero library
+        run: |
+          paperfind sync
+
       - name: Run digest
-        env:
-          # API keys
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
-          ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
-          CROSSREF_EMAIL: ${{ secrets.CROSSREF_EMAIL }}
-          # Email settings
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          # Optional: custom categories
-          ARXIV_CATEGORIES: ${{ secrets.ARXIV_CATEGORIES }}
-          BIORXIV_CATEGORIES: ${{ secrets.BIORXIV_CATEGORIES }}
         run: |
           paperfind digest \
             --days ${{ github.event.inputs.days || '1' }} \

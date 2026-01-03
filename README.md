@@ -167,7 +167,7 @@ Fetch papers from all sources with a single command:
 # Fetch today's papers from all sources (CrossRef, bioRxiv, medRxiv, arXiv)
 paperfind fetch
 
-# Fetch last 7 days and rebuild vector embeddings
+# Fetch last 7 days (including today) and rebuild vector embeddings
 paperfind fetch --days 7 --rebuild-vectors
 
 # Fetch from specific sources only
@@ -237,6 +237,8 @@ EMAIL_TO=you@example.com,teammate@example.com
 ```
 
 `EMAIL_TO` accepts a comma-separated list of recipient addresses (no spaces required).
+
+**Note for Gmail users:** If you have 2-factor authentication enabled, use an [App Password](https://myaccount.google.com/apppasswords) instead of your regular password.
 
 **Scheduled runs with GitHub Actions**
 
