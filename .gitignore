@@ -49,3 +49,8 @@ htmlcov/
 
 # Claude Code
 .claude/
+
+# Deployment issues
+deployment_docs/
+deploy/
+src/paperfind/lambda_handler.py
