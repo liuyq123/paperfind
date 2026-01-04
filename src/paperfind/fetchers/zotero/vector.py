@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Set
 from langchain_core.documents import Document
 
 from paperfind.logging import get_logger
-from paperfind.vectorstore import get_vector_store
+from paperfind.vectorstore import get_vector_store, get_vector_store_backend
 
 logger = get_logger(__name__)
 
@@ -48,6 +48,14 @@ def get_embedded_zotero_keys() -> Set[str]:
         logger.error(str(exc))
         return set()
 
+    backend = get_vector_store_backend()
+    if backend == "pgvector" and hasattr(vectordb, "list_ids"):
+        try:
+            return set(vectordb.list_ids())
+        except Exception as exc:
+            logger.error(f"Error retrieving pgvector ids: {exc}")
+            return set()
+
     # Get all documents from the vector store
     # For Chroma, we can use get() to retrieve all
     try:
@@ -65,6 +73,9 @@ def is_item_embedded(zotero_key: str) -> bool:
     """Check if an item is already embedded in the vector store."""
     try:
         vectordb = get_vectordb()
+        backend = get_vector_store_backend()
+        if backend == "pgvector" and hasattr(vectordb, "has_id"):
+            return bool(vectordb.has_id(zotero_key))
         result = vectordb.get(ids=[zotero_key])
         return bool(result and result.get("ids"))
     except Exception:

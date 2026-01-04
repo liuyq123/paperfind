@@ -46,6 +46,8 @@ def fetch_all(
     """
     if sources is None:
         sources = ["crossref", "biorxiv", "medrxiv", "arxiv"]
+    if days < 1:
+        raise ValueError("days must be >= 1")
 
     conn = init_db()
     end_date = date.today()
@@ -140,6 +142,9 @@ def run_fetch(
     """Run paper fetching with parsed parameters."""
     if vectors_only:
         rebuild_vectors()
+        return
+    if days < 1:
+        logger.error("Days must be >= 1.")
         return
 
     logger.info("=" * 50)

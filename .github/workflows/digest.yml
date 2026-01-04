@@ -25,17 +25,18 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
       ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
+      # ZOTERO_LIBRARY_TYPE: group  # Uncomment for group libraries (default: user)
       CROSSREF_EMAIL: ${{ secrets.CROSSREF_EMAIL }}
-      # Email settings
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      # Email settings (SMTP_HOST and SMTP_PORT use Gmail defaults)
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
       EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
       EMAIL_TO: ${{ secrets.EMAIL_TO }}
-      # Optional: custom categories
-      ARXIV_CATEGORIES: ${{ secrets.ARXIV_CATEGORIES }}
-      BIORXIV_CATEGORIES: ${{ secrets.BIORXIV_CATEGORIES }}
+      # Optional: custom categories (uncomment to override defaults)
+      # ARXIV_CATEGORIES: ${{ secrets.ARXIV_CATEGORIES }}
+      # BIORXIV_CATEGORIES: ${{ secrets.BIORXIV_CATEGORIES }}
 
     steps:
       - name: Checkout repository
@@ -62,6 +63,10 @@ jobs:
       - name: Sync Zotero library
         run: |
           paperfind sync
+
+      - name: Embed Zotero library
+        run: |
+          paperfind embed
 
       - name: Run digest
         run: |

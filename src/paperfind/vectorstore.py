@@ -255,6 +255,16 @@ class PGVectorStore(VectorStore):
     ) -> List[Tuple[Document, float]]:
         self._ensure_index()
         embedding = self.embedding_function.embed_query(query)
+        return self.similarity_search_by_vector_with_score(embedding, k=k, **kwargs)
+
+    def similarity_search_by_vector_with_score(
+        self,
+        embedding: List[float],
+        k: int = 4,
+        **kwargs: Any,
+    ) -> List[Tuple[Document, float]]:
+        """Search using a raw embedding vector."""
+        self._ensure_index()
         filter_clause, filter_params = _build_filter_clause(kwargs.get("filter"))
 
         conn = self._connect()
@@ -280,6 +290,24 @@ class PGVectorStore(VectorStore):
             distance = float(row["distance"])
             results.append((Document(page_content=document, metadata=metadata), distance))
         return results
+
+    def get_embeddings_by_ids(self, ids: List[str]) -> Dict[str, List[float]]:
+        """Return {id: embedding} for requested IDs."""
+        if not ids:
+            return {}
+
+        conn = self._connect()
+        cur = conn.cursor()
+        qualified = self._qualified_table()
+        placeholders = ", ".join(["%s"] * len(ids))
+        cur.execute(
+            f"SELECT id, embedding FROM {qualified} WHERE id IN ({placeholders})",
+            ids,
+        )
+        rows = cur.fetchall()
+        conn.close()
+
+        return {row["id"]: list(row["embedding"]) for row in rows}
 
     def delete(self, ids: Optional[List[str]] = None, where: Optional[dict] = None) -> None:
         conn = self._connect()
@@ -307,6 +335,26 @@ class PGVectorStore(VectorStore):
         result = cur.fetchone()["cnt"]
         conn.close()
         return int(result)
+
+    def list_ids(self) -> List[str]:
+        """Return all document ids in the vector store."""
+        conn = self._connect()
+        cur = conn.cursor()
+        qualified = self._qualified_table()
+        cur.execute(f"SELECT id FROM {qualified}")
+        rows = cur.fetchall()
+        conn.close()
+        return [row["id"] for row in rows]
+
+    def has_id(self, item_id: str) -> bool:
+        """Return True if a document id exists in the vector store."""
+        conn = self._connect()
+        cur = conn.cursor()
+        qualified = self._qualified_table()
+        cur.execute(f"SELECT 1 FROM {qualified} WHERE id = %s LIMIT 1", (item_id,))
+        exists = cur.fetchone() is not None
+        conn.close()
+        return exists
 
     def _connect(self):
         return _pgvector_connect()
@@ -397,6 +445,61 @@ def _build_filter_clause(metadata_filter: Optional[Dict[str, Any]]) -> Tuple[str
     if not metadata_filter:
         return "", []
     return "WHERE metadata @> %s::jsonb", [json.dumps(metadata_filter)]
+
+
+def get_embeddings_from_store(
+    vectordb: VectorStore,
+    ids: List[str],
+) -> Dict[str, List[float]]:
+    """
+    Get embeddings by ID from any vector store backend.
+
+    Returns {id: embedding} for found IDs.
+    """
+    if not ids:
+        return {}
+
+    # PGVectorStore has native method
+    if isinstance(vectordb, PGVectorStore):
+        return vectordb.get_embeddings_by_ids(ids)
+
+    # Chroma: use _collection.get()
+    if hasattr(vectordb, "_collection"):
+        try:
+            result = vectordb._collection.get(ids=ids, include=["embeddings"])
+            if result and result.get("ids") and result.get("embeddings"):
+                return dict(zip(result["ids"], result["embeddings"]))
+        except Exception as exc:
+            logger.warning(f"Failed to get embeddings from Chroma: {exc}")
+
+    return {}
+
+
+def similarity_search_by_vector(
+    vectordb: VectorStore,
+    embedding: List[float],
+    k: int = 4,
+    **kwargs: Any,
+) -> List[Tuple[Document, float]]:
+    """
+    Search by raw embedding vector in any vector store backend.
+
+    Returns list of (Document, score) tuples.
+    """
+    # PGVectorStore has native method
+    if isinstance(vectordb, PGVectorStore):
+        return vectordb.similarity_search_by_vector_with_score(embedding, k=k, **kwargs)
+
+    # Chroma/LangChain stores have similarity_search_by_vector
+    if hasattr(vectordb, "similarity_search_by_vector_with_relevance_scores"):
+        return vectordb.similarity_search_by_vector_with_relevance_scores(embedding, k=k, **kwargs)
+
+    # Fallback: some stores return without scores
+    if hasattr(vectordb, "similarity_search_by_vector"):
+        docs = vectordb.similarity_search_by_vector(embedding, k=k, **kwargs)
+        return [(doc, 0.0) for doc in docs]
+
+    raise NotImplementedError(f"Vector store {type(vectordb)} does not support similarity_search_by_vector")
 
 
 def _normalize_metadata(value: Any) -> Dict[str, Any]:

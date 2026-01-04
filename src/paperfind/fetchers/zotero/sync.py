@@ -4,8 +4,11 @@ High-level Zotero sync functions and CLI.
 Usage:
     paperfind sync                           # Sync entire library
     paperfind sync --list-collections        # List available collections
+    paperfind embed                          # Embed all items in library
     paperfind embed "my collection"          # Embed items in a collection
 """
+
+from typing import Optional
 
 from paperfind.config import (
     ZOTERO_API_KEY,
@@ -17,6 +20,7 @@ from paperfind.logging import get_logger
 from .api import fetch_collections, fetch_library_items
 from .db import (
     get_all_collections,
+    get_all_items,
     get_collection_by_name_or_key,
     get_items_for_collection,
     get_library,
@@ -82,6 +86,40 @@ def sync_library() -> int:
     update_library_sync_time(library_pk)
 
     return item_count
+
+
+def embed_all(force: bool = False) -> int:
+    """
+    Embed all items in the Zotero library.
+
+    Args:
+        force: If True, re-embed all items even if already embedded
+
+    Returns:
+        Number of items embedded.
+    """
+    if not ZOTERO_USER_ID:
+        raise ValueError("ZOTERO_USER_ID is not set in .env")
+
+    # Get library
+    library = get_library(ZOTERO_USER_ID, ZOTERO_LIBRARY_TYPE)
+    if not library:
+        raise ValueError("Library not found. Run 'paperfind sync' first.")
+
+    library_pk = library["id"]
+
+    # Get all items
+    items = get_all_items(library_pk)
+    if not items:
+        logger.warning("No items found in library")
+        return 0
+
+    logger.info(f"Found {len(items)} items in library")
+
+    # Embed items
+    num_embedded = embed_items(items, skip_existing=not force)
+
+    return num_embedded
 
 
 def embed_collection(
@@ -197,23 +235,38 @@ def run_sync(list_collections_flag: bool) -> None:
         sys.exit(1)
 
 
-def run_embed(collection: str, force: bool) -> None:
-    """Run embedding for a collection."""
+def run_embed(collection: Optional[str], force: bool) -> None:
+    """Run embedding for a collection or entire library."""
     import sys
 
     # Initialize database (in case it hasn't been)
     init_db()
 
-    logger.info("=" * 60)
-    logger.info(f"Embedding Collection: {collection}")
-    logger.info("=" * 60)
+    if collection:
+        logger.info("=" * 60)
+        logger.info(f"Embedding Collection: {collection}")
+        logger.info("=" * 60)
 
-    try:
-        num_embedded = embed_collection(collection, force=force)
-        logger.info(f"Embedding complete! Embedded {num_embedded} items.")
-    except ValueError as e:
-        logger.error(f"Embedding failed: {e}")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Unexpected error during embedding: {e}")
-        sys.exit(1)
+        try:
+            num_embedded = embed_collection(collection, force=force)
+            logger.info(f"Embedding complete! Embedded {num_embedded} items.")
+        except ValueError as e:
+            logger.error(f"Embedding failed: {e}")
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f"Unexpected error during embedding: {e}")
+            sys.exit(1)
+    else:
+        logger.info("=" * 60)
+        logger.info("Embedding All Items")
+        logger.info("=" * 60)
+
+        try:
+            num_embedded = embed_all(force=force)
+            logger.info(f"Embedding complete! Embedded {num_embedded} items.")
+        except ValueError as e:
+            logger.error(f"Embedding failed: {e}")
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f"Unexpected error during embedding: {e}")
+            sys.exit(1)

@@ -1,5 +1,7 @@
 # Paperfind
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 A paper recommendation system that discovers relevant papers and preprints based on your Zotero library. It fetches metadata from CrossRef, bioRxiv, medRxiv, and arXiv, then uses semantic search and cross-encoder reranking to recommend papers similar to your existing research interests.
 
 ## Table of Contents
@@ -19,10 +21,11 @@ A paper recommendation system that discovers relevant papers and preprints based
   - [Fetch Papers](#fetch-papers)
   - [Email Digest](#email-digest)
   - [Semantic Search](#semantic-search)
-  - [API Server (optional)](#api-server-optional)
   - [Embedding Providers](#embedding-providers)
+  - [API Server (optional)](#api-server-optional)
 - [Data Storage](#data-storage)
   - [What Happens on Repeated Runs](#what-happens-on-repeated-runs)
+- [License](#license)
 
 ## Features
 
@@ -193,11 +196,6 @@ paperfind fetch --biorxiv-category bioinformatics --medrxiv-category genomics
 paperfind fetch --vectors-only
 ```
 
-Example (category-filtered fetch):
-
-```bash
-paperfind fetch --days 3 --biorxiv-category synthetic-biology
-```
 
 **Options:**
 
@@ -255,9 +253,7 @@ EMAIL_TO=you@example.com,teammate@example.com
 
 **Scheduled runs with GitHub Actions**
 
-If you want the digest to run on a schedule, add a GitHub Actions workflow that runs
-`paperfind digest` on a cron. Store the same SMTP and API credentials as repository or
-organization secrets, then load them as environment variables in the workflow.
+To run the digest on a schedule, see the example workflow in [`.github/workflows/digest.yml`](.github/workflows/digest.yml). Store your SMTP and API credentials as repository secrets (Settings → Secrets and variables → Actions).
 
 ### Semantic Search
 
@@ -279,56 +275,6 @@ paperfind search "active learning" -s zotero
 # Ask a question using RAG (Retrieval-Augmented Generation)
 paperfind search "What methods are used for ultra-large library screening?" --rag
 ```
-
-### API Server (optional)
-
-Run the REST API server:
-
-```bash
-pip install paperfind[api]
-uvicorn paperfind.api:app --reload
-```
-
-**Available Endpoints:**
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Health check |
-| GET | `/collections` | List Zotero collections |
-| GET | `/search?query=...` | Semantic search (supports `scores`, `rag`, `source` params) |
-| GET | `/papers` | List fetched papers (paginated) |
-| GET | `/recommend` | Get paper recommendations |
-| POST | `/sync` | Trigger Zotero library sync (background job) |
-| POST | `/embed?collection=...` | Embed a collection for semantic search (background job) |
-| POST | `/fetch` | Trigger paper fetching (background job) |
-| GET | `/jobs/{job_id}` | Check background job status |
-
-**Example usage:**
-
-```bash
-# Search papers
-curl "http://localhost:8000/search?query=machine+learning&k=5"
-
-# Get recommendations
-curl "http://localhost:8000/recommend?k=10"
-
-# Sync your Zotero library
-curl -X POST "http://localhost:8000/sync"
-
-# Embed a collection
-curl -X POST "http://localhost:8000/embed?collection=my+research"
-
-# Start a fetch job
-curl -X POST "http://localhost:8000/fetch?days=3"
-# Returns: {"job_id": "abc-123", "status": "pending", "job_type": "fetch"}
-
-# Check job status
-curl "http://localhost:8000/jobs/abc-123"
-```
-
-Interactive API docs available at `http://localhost:8000/docs`.
-
-Project structure is documented in `src/README.md`.
 
 ### Embedding Providers
 
@@ -382,6 +328,10 @@ paperfind fetch --rebuild-vectors
 paperfind embed "your collection" --force  # to rebuild Zotero vectors
 ```
 
+### API Server (optional)
+
+For programmatic access, Paperfind includes a REST API. Install with `pip install paperfind[api]` and see [src/README.md](src/README.md#api-server) for endpoints and examples.
+
 ## Data Storage
 
 By default, data is stored in `~/.paperfind/` using SQLite and Chroma. To use Postgres,
@@ -409,4 +359,8 @@ database with two schemas (`daily`, `zotero`). To store embeddings in Postgres, 
 | `paperfind recommend` | Read-only. Queries existing databases. Creates output file only if `-o` specified. |
 | `paperfind search` | Read-only. Queries existing vector stores. |
 
-For database schema details, see [src/README.md](src/README.md#database-schemas)
+For database schema details, see [src/README.md](src/README.md#database-schemas).
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.

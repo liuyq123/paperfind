@@ -30,7 +30,12 @@ from paperfind.logging import get_logger
 from paperfind.rerank import get_rerank_model, rerank_pairs
 from paperfind.search.formatting import format_document, format_markdown_recommendation
 from paperfind.search.utils import check_vector_store
-from paperfind.vectorstore import get_vector_store
+from paperfind.vectorstore import (
+    get_embeddings_from_store,
+    get_vector_store,
+    similarity_search_by_vector,
+    vector_store_exists,
+)
 
 logger = get_logger(__name__)
 
@@ -99,7 +104,7 @@ def get_collection_id_by_name(collection_name: str) -> Optional[int]:
 
 
 def get_zotero_papers(collection: Optional[str] = None) -> List[ZoteroPaper]:
-    """Get papers from Zotero database."""
+    """Get papers from Zotero database (includes zotero_key for embedding lookup)."""
     if not _check_zotero_db():
         return []
 
@@ -114,7 +119,7 @@ def get_zotero_papers(collection: Optional[str] = None) -> List[ZoteroPaper]:
         if collection_id:
             cur.execute(
                 f"""
-                SELECT i.title, i.abstract, i.doi
+                SELECT i.zotero_key, i.title, i.abstract, i.doi
                 FROM {items_table} i
                 JOIN {item_collections_table} ic ON i.id = ic.item_id
                 WHERE ic.collection_id = {ph}
@@ -126,7 +131,7 @@ def get_zotero_papers(collection: Optional[str] = None) -> List[ZoteroPaper]:
             conn.close()
             return []
     else:
-        cur.execute(f"SELECT title, abstract, doi FROM {items_table}")
+        cur.execute(f"SELECT zotero_key, title, abstract, doi FROM {items_table}")
 
     papers = [dict(row) for row in cur.fetchall()]
     conn.close()
@@ -215,7 +220,7 @@ def get_recommendations(
     """
     Get paper recommendations based on Zotero library.
 
-    Uses each Zotero paper as a query and finds similar papers
+    Uses pre-embedded Zotero papers to find similar papers
     from the daily papers database.
 
     If return_rerank_used is True, returns (recommendations, rerank_used).
@@ -228,40 +233,65 @@ def get_recommendations(
     if not check_vector_store():
         return _return_empty()
 
-    # Get Zotero papers to use as queries
+    # Check if Zotero embeddings exist
+    if not vector_store_exists("zotero"):
+        logger.error("Zotero embeddings not found. Run 'paperfind embed' first.")
+        return _return_empty()
+
+    # Get Zotero papers (includes zotero_key for embedding lookup)
     zotero_papers = get_zotero_papers(collection)
     if not zotero_papers:
         return _return_empty()
 
+    # Get zotero_keys for embedding lookup
+    zotero_keys = [p["zotero_key"] for p in zotero_papers if p.get("zotero_key")]
+    if not zotero_keys:
+        logger.error("No Zotero keys found in database.")
+        return _return_empty()
+
+    # Build lookup for paper metadata by zotero_key
+    paper_by_key = {p["zotero_key"]: p for p in zotero_papers if p.get("zotero_key")}
+
     # Get DOIs to exclude (already in library)
     existing_dois = get_zotero_dois()
 
-    # Load the daily papers vector store
-    vectordb = get_vector_store()
+    # Load vector stores
+    zotero_vectordb = get_vector_store("zotero")
+    daily_vectordb = get_vector_store()
+
+    # Get pre-computed embeddings from Zotero vector store
+    logger.info(f"Loading embeddings for {len(zotero_keys)} Zotero papers...")
+    embeddings = get_embeddings_from_store(zotero_vectordb, zotero_keys)
+
+    if not embeddings:
+        logger.error("No embeddings found. Run 'paperfind embed' first.")
+        return _return_empty()
+
+    missing_count = len(zotero_keys) - len(embeddings)
+    if missing_count > 0:
+        logger.warning(f"{missing_count} papers not embedded. Run 'paperfind embed' to embed all.")
 
     # Collect recommendations with scores
     recommendations = {}  # doi -> (score, doc, zotero_title, query_text)
 
-    logger.info(f"Finding papers similar to {len(zotero_papers)} papers in your library...")
+    logger.info(f"Finding papers similar to {len(embeddings)} embedded papers...")
 
     candidate_k = max(k, rerank_candidates) if rerank else k
 
-    for paper in zotero_papers:
-        # Build query from title + abstract
+    for zotero_key, embedding in embeddings.items():
+        paper = paper_by_key.get(zotero_key, {})
+        zotero_title = paper.get("title", "Unknown")
+
+        # Build query text for reranking (title + abstract)
         query_parts = []
         if paper.get("title"):
             query_parts.append(paper["title"])
         if paper.get("abstract"):
             query_parts.append(paper["abstract"])
+        query_text = " ".join(query_parts) if query_parts else zotero_title
 
-        if not query_parts:
-            continue
-
-        query = " ".join(query_parts)
-        zotero_title = paper.get("title", "Unknown")
-
-        # Search for similar papers
-        results = vectordb.similarity_search_with_score(query, k=candidate_k)
+        # Search daily papers using pre-computed embedding
+        results = similarity_search_by_vector(daily_vectordb, embedding, k=candidate_k)
 
         for doc, score in results:
             doi = doc.metadata.get("doi", "")
@@ -274,7 +304,7 @@ def get_recommendations(
 
             # Keep track of best score for each paper (with source Zotero paper)
             if doi not in recommendations or score < recommendations[doi][0]:
-                recommendations[doi] = (score, doc, zotero_title, query)
+                recommendations[doi] = (score, doc, zotero_title, query_text)
 
     # Sort by score (lower is better for distance)
     sorted_recs = sorted(recommendations.items(), key=lambda x: x[1][0])
@@ -347,9 +377,9 @@ def run_recommend(
 
     if not recommendations:
         logger.warning("No recommendations found. Make sure you have:")
-        logger.warning("  1. Papers in your Zotero library (paperfind sync)")
-        logger.warning("  2. Fetched daily papers (paperfind fetch)")
-        logger.warning("  3. Built vector embeddings (paperfind fetch --rebuild-vectors)")
+        logger.warning("  1. Synced your Zotero library (paperfind sync)")
+        logger.warning("  2. Embedded your Zotero papers (paperfind embed)")
+        logger.warning("  3. Fetched daily papers (paperfind fetch --rebuild-vectors)")
         return
 
     # Save to markdown file if output specified

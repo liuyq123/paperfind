@@ -12,7 +12,7 @@ Usage:
 from datetime import date
 from typing import Optional
 
-from paperfind.config import EMAIL_TO
+from paperfind.config import EMAIL_FROM, EMAIL_TO, SMTP_PASSWORD, SMTP_USER
 from paperfind.digest.email import send_email
 from paperfind.digest.template import render_digest
 from paperfind.fetchers.fetch_papers import fetch_all
@@ -45,6 +45,9 @@ def run_digest(
     today = date.today()
 
     if not skip_fetch:
+        if days < 1:
+            logger.error("Days must be >= 1.")
+            return
         # Step 1: Fetch new papers
         logger.info("=" * 50)
         logger.info(f"Step 1: Fetching papers from last {days} day(s)")
@@ -93,10 +96,20 @@ def run_digest(
         if not EMAIL_TO:
             logger.error("EMAIL_TO not set in .env. Use --dry-run to preview without sending.")
             return
+        if not SMTP_USER or not SMTP_PASSWORD:
+            logger.error("SMTP_USER and SMTP_PASSWORD must be set in .env to send emails.")
+            return
+        if not EMAIL_FROM:
+            logger.error("EMAIL_FROM must be set in .env to send emails.")
+            return
 
         to_addresses = [addr.strip() for addr in EMAIL_TO.split(",") if addr.strip()]
         subject = f"Paper Recommendations - {today.strftime('%B %d, %Y')}"
 
-        send_email(subject=subject, html_body=html, to_addresses=to_addresses)
+        try:
+            send_email(subject=subject, html_body=html, to_addresses=to_addresses)
+        except ValueError as exc:
+            logger.error(f"Email sending failed: {exc}")
+            return
 
     logger.info("Digest complete!")

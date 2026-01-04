@@ -3,6 +3,7 @@ Command-line interface for Paperfind.
 
 Usage:
     paperfind sync                     # Sync entire Zotero library
+    paperfind embed                    # Embed all items in library
     paperfind embed "collection"       # Embed items in a collection
     paperfind fetch                    # Fetch papers from all sources
     paperfind recommend                # Get paper recommendations
@@ -13,6 +14,17 @@ Usage:
 import argparse
 import sys
 from typing import Optional
+
+
+def positive_int(value: str) -> int:
+    """Parse a positive integer from CLI input."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"Invalid integer value: {value}") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("Value must be >= 1")
+    return parsed
 
 
 def main() -> None:
@@ -48,8 +60,11 @@ def main() -> None:
     )
 
     # Embed command
-    embed_parser = subparsers.add_parser("embed", help="Embed Zotero collection for semantic search")
-    embed_parser.add_argument("collection", type=str, help="Collection name or key to embed")
+    embed_parser = subparsers.add_parser("embed", help="Embed Zotero items for semantic search")
+    embed_parser.add_argument(
+        "collection", type=str, nargs="?", default=None,
+        help="Collection name or key (omit to embed all items)"
+    )
     embed_parser.add_argument(
         "--force", action="store_true", help="Re-embed all items (ignore existing embeddings)"
     )
@@ -59,7 +74,7 @@ def main() -> None:
 
     fetch_parser = subparsers.add_parser("fetch", help="Fetch papers from external sources")
     fetch_parser.add_argument(
-        "--days", type=int, default=1, help="Number of days to look back (default: 1)"
+        "--days", type=positive_int, default=1, help="Number of days to look back (default: 1)"
     )
     fetch_parser.add_argument(
         "--source",
@@ -136,7 +151,7 @@ def main() -> None:
     # Digest command
     digest_parser = subparsers.add_parser("digest", help="Send email digest of recommendations")
     digest_parser.add_argument(
-        "--days", type=int, default=1, help="Number of days to fetch papers (default: 1)"
+        "--days", type=positive_int, default=1, help="Number of days to fetch papers (default: 1)"
     )
     digest_parser.add_argument(
         "-k", "--num-results", type=int, default=10, help="Number of recommendations (default: 10)"

@@ -92,3 +92,56 @@ When `PAPERFIND_VECTOR_STORE=pgvector`, embeddings are stored in Postgres tables
 | `zotero.zotero_vectors_<provider>_<model>` | Embeddings for Zotero items |
 
 Each vector table has columns: `id`, `embedding`, `document`, `metadata`
+
+## API Server
+
+Paperfind includes a REST API for programmatic access.
+
+### Setup
+
+```bash
+pip install paperfind[api]
+uvicorn paperfind.api:app --reload
+```
+
+Interactive API docs available at `http://localhost:8000/docs`.
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check |
+| GET | `/collections` | List Zotero collections |
+| GET | `/search?query=...` | Semantic search (supports `scores`, `rag`, `source` params) |
+| GET | `/papers` | List fetched papers (paginated) |
+| GET | `/recommend` | Get paper recommendations |
+| POST | `/sync` | Trigger Zotero library sync (background job) |
+| POST | `/embed` | Embed Zotero items for semantic search (optional: `collection`) |
+| POST | `/fetch` | Trigger paper fetching (background job) |
+| GET | `/jobs/{job_id}` | Check background job status |
+
+### Examples
+
+```bash
+# Search papers
+curl "http://localhost:8000/search?query=machine+learning&k=5"
+
+# Get recommendations
+curl "http://localhost:8000/recommend?k=10"
+
+# Sync your Zotero library
+curl -X POST "http://localhost:8000/sync"
+
+# Embed all items
+curl -X POST "http://localhost:8000/embed"
+
+# Embed a specific collection
+curl -X POST "http://localhost:8000/embed?collection=my+research"
+
+# Start a fetch job
+curl -X POST "http://localhost:8000/fetch?days=3"
+# Returns: {"job_id": "abc-123", "status": "pending", "job_type": "fetch"}
+
+# Check job status
+curl "http://localhost:8000/jobs/abc-123"
+```

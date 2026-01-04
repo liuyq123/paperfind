@@ -466,18 +466,24 @@ def _run_fetch(
         job.completed_at = datetime.now(timezone.utc).isoformat()
 
 
-def _run_embed(job: JobState, collection: str, force: bool) -> None:
-    """Background task to embed a Zotero collection."""
-    from paperfind.fetchers.zotero.sync import embed_collection
+def _run_embed(job: JobState, collection: Optional[str], force: bool) -> None:
+    """Background task to embed Zotero items."""
+    from paperfind.fetchers.zotero.sync import embed_all, embed_collection
 
     job.status = "running"
     try:
-        num_embedded = embed_collection(collection, force=force)
+        if collection:
+            num_embedded = embed_collection(collection, force=force)
+            message = f"Embedded {num_embedded} items from collection '{collection}'"
+        else:
+            num_embedded = embed_all(force=force)
+            message = f"Embedded {num_embedded} items from library"
+
         job.result = {
             "collection": collection,
             "num_embedded": num_embedded,
             "force": force,
-            "message": f"Embedded {num_embedded} items from collection '{collection}'",
+            "message": message,
         }
         job.status = "completed"
     except Exception as e:
@@ -513,12 +519,15 @@ def sync(
 @app.post("/embed", response_model=JobResponse)
 def embed(
     background_tasks: BackgroundTasks,
-    collection: str = Query(..., min_length=1, description="Collection name or key to embed"),
+    collection: Optional[str] = Query(
+        default=None, description="Collection name or key (omit to embed all items)"
+    ),
     force: bool = Query(default=False, description="Re-embed all items (ignore existing)"),
 ) -> JobResponse:
-    """Embed a Zotero collection for semantic search.
+    """Embed Zotero items for semantic search.
 
-    Creates vector embeddings for items in the specified collection.
+    Creates vector embeddings for items. If collection is specified,
+    embeds only that collection; otherwise embeds all items.
     Items already embedded are skipped unless force=True.
     """
     job = _create_job("embed")
