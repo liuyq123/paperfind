@@ -70,27 +70,22 @@ def main() -> None:
     )
 
     # Fetch command
-    from paperfind.config import BIORXIV_CATEGORIES
-
     fetch_parser = subparsers.add_parser("fetch", help="Fetch papers from external sources")
     fetch_parser.add_argument(
         "--days", type=positive_int, default=1, help="Number of days to look back (default: 1)"
     )
     fetch_parser.add_argument(
+        "--arxiv-days",
+        type=positive_int,
+        default=None,
+        help="Number of days to look back for arXiv (default: same as --days). "
+             "Useful since arXiv has batch processing delays.",
+    )
+    fetch_parser.add_argument(
         "--source",
         action="append",
-        choices=["crossref", "biorxiv", "medrxiv", "arxiv"],
+        choices=["crossref", "biorxiv", "medrxiv", "arxiv", "chemrxiv"],
         help="Source(s) to fetch from (default: all)",
-    )
-    fetch_parser.add_argument(
-        "--biorxiv-category",
-        choices=BIORXIV_CATEGORIES,
-        help="bioRxiv category filter (default: all)",
-    )
-    fetch_parser.add_argument(
-        "--medrxiv-category",
-        choices=BIORXIV_CATEGORIES,
-        help="medRxiv category filter (default: all)",
     )
     fetch_parser.add_argument(
         "--rebuild-vectors", action="store_true", help="Rebuild vector embeddings after fetching"
@@ -125,6 +120,12 @@ def main() -> None:
         default=50,
         help="Number of top candidates to rerank (default: 50)",
     )
+    rec_parser.add_argument(
+        "--max-age",
+        type=positive_int,
+        default=None,
+        help="Only recommend papers published within this many days",
+    )
     rec_parser.set_defaults(rerank=True)
 
     # Search command
@@ -154,6 +155,13 @@ def main() -> None:
         "--days", type=positive_int, default=1, help="Number of days to fetch papers (default: 1)"
     )
     digest_parser.add_argument(
+        "--arxiv-days",
+        type=positive_int,
+        default=None,
+        help="Number of days to look back for arXiv (default: same as --days). "
+             "Useful since arXiv has batch processing delays.",
+    )
+    digest_parser.add_argument(
         "-k", "--num-results", type=int, default=10, help="Number of recommendations (default: 10)"
     )
     digest_parser.add_argument(
@@ -169,6 +177,12 @@ def main() -> None:
         "--no-rerank",
         action="store_true",
         help="Disable cross-encoder reranking",
+    )
+    digest_parser.add_argument(
+        "--max-age",
+        type=positive_int,
+        default=None,
+        help="Only recommend papers published within this many days (avoids repeats)",
     )
 
     args = parser.parse_args()
@@ -203,9 +217,8 @@ def main() -> None:
 
         run_fetch(
             days=args.days,
+            arxiv_days=args.arxiv_days,
             sources=args.source,
-            biorxiv_category=args.biorxiv_category,
-            medrxiv_category=args.medrxiv_category,
             rebuild_vectors_flag=args.rebuild_vectors,
             vectors_only=args.vectors_only,
         )
@@ -219,6 +232,7 @@ def main() -> None:
             output=args.output,
             rerank=args.rerank,
             rerank_candidates=args.rerank_candidates,
+            max_age_days=args.max_age,
         )
 
     elif args.command == "search":
@@ -250,11 +264,13 @@ def main() -> None:
 
         run_digest(
             days=args.days,
+            arxiv_days=args.arxiv_days,
             num_recommendations=args.num_results,
             collection=args.collection,
             dry_run=args.dry_run,
             skip_fetch=args.skip_fetch,
             rerank=not args.no_rerank,
+            max_age_days=args.max_age,
         )
 
 

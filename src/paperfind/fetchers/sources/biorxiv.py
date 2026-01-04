@@ -53,7 +53,9 @@ def fetch_biorxiv(
         for item in collection:
             if category:
                 item_category = item.get("category", "").lower()
-                if category.lower() not in item_category:
+                # Normalize hyphens to spaces for comparison (config uses hyphens, API uses spaces)
+                normalized_category = category.lower().replace("-", " ")
+                if normalized_category not in item_category:
                     continue
 
             doi = item.get("doi")

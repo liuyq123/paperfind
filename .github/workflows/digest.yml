@@ -11,6 +11,10 @@ on:
         description: 'Number of days to fetch papers'
         required: false
         default: '1'
+      arxiv_days:
+        description: 'Number of days to fetch from arXiv (has API delay)'
+        required: false
+        default: '3'
       num_results:
         description: 'Number of recommendations'
         required: false
@@ -73,4 +77,5 @@ jobs:
         run: |
           paperfind digest \
             --days ${{ github.event.inputs.days || '1' }} \
+            --arxiv-days ${{ github.event.inputs.arxiv_days || '3' }} \
             -k ${{ github.event.inputs.num_results || '10' }}

@@ -11,7 +11,7 @@ Usage:
     paperfind recommend --no-rerank                  # Disable reranking
 """
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -216,6 +216,7 @@ def get_recommendations(
     rerank: bool = True,
     rerank_candidates: int = 50,
     return_rerank_used: bool = False,
+    max_age_days: Optional[int] = None,
 ) -> RecommendationResult:
     """
     Get paper recommendations based on Zotero library.
@@ -223,7 +224,13 @@ def get_recommendations(
     Uses pre-embedded Zotero papers to find similar papers
     from the daily papers database.
 
-    If return_rerank_used is True, returns (recommendations, rerank_used).
+    Args:
+        k: Number of recommendations to return
+        collection: Optional Zotero collection to base recommendations on
+        rerank: Whether to use cross-encoder reranking
+        rerank_candidates: Number of candidates to consider for reranking
+        return_rerank_used: If True, returns (recommendations, rerank_used)
+        max_age_days: Only recommend papers published within this many days
     """
     def _return_empty() -> RecommendationResult:
         empty: RecommendationList = []
@@ -274,6 +281,12 @@ def get_recommendations(
     # Collect recommendations with scores
     recommendations = {}  # doi -> (score, doc, zotero_title, query_text)
 
+    # Calculate cutoff date for filtering
+    cutoff_date = None
+    if max_age_days is not None:
+        cutoff_date = date.today() - timedelta(days=max_age_days - 1)
+        logger.info(f"Filtering to papers published since {cutoff_date}")
+
     logger.info(f"Finding papers similar to {len(embeddings)} embedded papers...")
 
     candidate_k = max(k, rerank_candidates) if rerank else k
@@ -301,6 +314,17 @@ def get_recommendations(
             # Skip if already in Zotero
             if doi.lower() in existing_dois:
                 continue
+
+            # Skip if paper is older than cutoff date
+            if cutoff_date is not None:
+                created_date_str = doc.metadata.get("created_date")
+                if created_date_str:
+                    try:
+                        paper_date = date.fromisoformat(str(created_date_str)[:10])
+                        if paper_date < cutoff_date:
+                            continue
+                    except (ValueError, TypeError):
+                        pass  # Include papers with unparseable dates
 
             # Keep track of best score for each paper (with source Zotero paper)
             if doi not in recommendations or score < recommendations[doi][0]:
@@ -361,6 +385,7 @@ def run_recommend(
     output: Optional[str] = None,
     rerank: bool = True,
     rerank_candidates: int = 50,
+    max_age_days: Optional[int] = None,
 ) -> None:
     """Run paper recommendations with parsed parameters."""
     logger.info("=" * 60)
@@ -373,6 +398,7 @@ def run_recommend(
         rerank=rerank,
         rerank_candidates=rerank_candidates,
         return_rerank_used=True,
+        max_age_days=max_age_days,
     )
 
     if not recommendations:

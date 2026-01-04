@@ -13,7 +13,7 @@ from paperfind.db import (
     table_exists,
 )
 from paperfind.logging import get_logger
-from paperfind.vectorstore import get_vector_store, get_vector_store_backend
+from paperfind.vectorstore import get_existing_ids, get_vector_store, get_vector_store_backend
 
 logger = get_logger(__name__)
 
@@ -48,7 +48,10 @@ def _build_documents(rows: Sequence[Mapping[str, Any]]) -> List[Any]:
 
 
 def upsert_vectors_for_dois(dois: List[str], batch_size: int = DEFAULT_BATCH_SIZE) -> int:
-    """Upsert vector embeddings for specific DOIs."""
+    """Upsert vector embeddings for specific DOIs.
+
+    Skips DOIs that are already in the vector store to avoid re-embedding.
+    """
     if not dois:
         return 0
 
@@ -60,13 +63,25 @@ def upsert_vectors_for_dois(dois: List[str], batch_size: int = DEFAULT_BATCH_SIZ
         logger.error(str(exc))
         return 0
 
+    # Filter out DOIs already in the vector store
+    existing_ids = get_existing_ids(vectordb)
+    new_dois = [doi for doi in dois if doi not in existing_ids]
+
+    if not new_dois:
+        logger.info("    No new papers to embed (all already in vector store)")
+        return 0
+
+    skipped = len(dois) - len(new_dois)
+    if skipped > 0:
+        logger.debug(f"    Skipping {skipped} papers already in vector store")
+
     conn = get_conn(DAILY_SCHEMA)
     cur = conn.cursor()
 
     total_docs = 0
 
-    for i in range(0, len(dois), batch_size):
-        chunk = dois[i : i + batch_size]
+    for i in range(0, len(new_dois), batch_size):
+        chunk = new_dois[i : i + batch_size]
         placeholders_sql = placeholders(len(chunk))
         table = qualify_table(DAILY_SCHEMA, "works")
         cur.execute(
@@ -87,7 +102,7 @@ def upsert_vectors_for_dois(dois: List[str], batch_size: int = DEFAULT_BATCH_SIZ
         total_docs += len(docs)
 
     conn.close()
-    logger.info(f"    Upserted {total_docs} documents into vector store")
+    logger.info(f"    Embedded {total_docs} new documents into vector store")
     return total_docs
 
 

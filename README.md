@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-A paper recommendation system that discovers relevant papers and preprints based on your Zotero library. It fetches metadata from CrossRef, bioRxiv, medRxiv, and arXiv, then uses semantic search and cross-encoder reranking to recommend papers similar to your existing research interests.
+A paper recommendation system that discovers relevant papers and preprints based on your Zotero library. It fetches metadata from CrossRef, bioRxiv, medRxiv, arXiv, and ChemRxiv, then uses semantic search and cross-encoder reranking to recommend papers similar to your existing research interests.
 
 ## Table of Contents
 
@@ -30,7 +30,7 @@ A paper recommendation system that discovers relevant papers and preprints based
 ## Features
 
 - **Paper Recommendations**: Get daily paper recommendations based on your Zotero library
-- **Paper Harvesting**: Fetches paper metadata (title, authors, abstract) from CrossRef, bioRxiv, medRxiv, and arXiv
+- **Paper Harvesting**: Fetches paper metadata (title, authors, abstract) from CrossRef, bioRxiv, medRxiv, arXiv, and ChemRxiv
 - **Zotero Integration**: Syncs with your personal Zotero library to understand your research interests
 - **Semantic Search**: Search across papers using OpenAI embeddings and ChromaDB
 - **RAG Pipeline**: Ask questions about your paper collection using GPT-4
@@ -180,7 +180,7 @@ Rerank scores are raw cross-encoder scores where higher is better.
 Fetch papers from all sources with a single command:
 
 ```bash
-# Fetch today's papers from all sources (CrossRef, bioRxiv, medRxiv, arXiv)
+# Fetch today's papers from all sources (CrossRef, bioRxiv, medRxiv, arXiv, ChemRxiv)
 paperfind fetch
 
 # Fetch last 7 days (including today) and rebuild vector embeddings
@@ -189,29 +189,22 @@ paperfind fetch --days 7 --rebuild-vectors
 # Fetch from specific sources only
 paperfind fetch --source arxiv --source biorxiv
 
-# Fetch bioRxiv/medRxiv with category filters
-paperfind fetch --biorxiv-category bioinformatics --medrxiv-category genomics
+# Fetch 1 day from most sources, but 7 days from arXiv (see note below)
+paperfind fetch --days 1 --arxiv-days 7
 
 # Only rebuild vectors (no fetching)
 paperfind fetch --vectors-only
 ```
 
-
-**Options:**
-
-| Flag | Description |
-|------|-------------|
-| `--days N` | Number of days to fetch (default: 1) |
-| `--source` | Specific source(s): `crossref`, `biorxiv`, `medrxiv`, `arxiv` |
-| `--biorxiv-category` | Filter bioRxiv results by category (default: all) |
-| `--medrxiv-category` | Filter medRxiv results by category (default: all) |
-| `--rebuild-vectors` | Rebuild vector embeddings after fetching |
-| `--vectors-only` | Only rebuild vectors, skip fetching |
-
 **Sources and categories:**
 - **CrossRef**: Journal articles and preprints with DOIs
-- **bioRxiv/medRxiv**: Life science preprints (categories: `bioinformatics`, `biochemistry`, `pharmacology-and-toxicology`, `systems-biology`, `synthetic-biology`, `molecular-biology`, `cell-biology`, `genomics`, `biophysics`). The authoritative list lives in `BIORXIV_CATEGORIES` in `src/paperfind/fetchers/sources/biorxiv.py`.
-- **arXiv**: Categories `q-bio.BM`, `q-bio.QM`, `cs.LG`, `cs.AI`, `stat.ML`
+- **bioRxiv/medRxiv**: Life science preprints. Categories configured via `BIORXIV_CATEGORIES` env var.
+- **arXiv**: Preprints. Categories configured via `ARXIV_CATEGORIES` env var.
+- **ChemRxiv**: Chemistry preprints.
+
+See [`.env.example`](.env.example) for default categories and customization.
+
+**Note on arXiv delays:** arXiv has a delay between the publish date and when papers become available via the API. Use `--arxiv-days` to fetch a longer window from arXiv while keeping a shorter window for other sources.
 
 ### Email Digest
 
@@ -226,6 +219,9 @@ paperfind digest --dry-run
 
 # Include the last 7 days of papers in the digest
 paperfind digest --days 7
+
+# Fetch 1 day from most sources, but 7 days from arXiv
+paperfind digest --days 1 --arxiv-days 7
 
 # Include more recommendations in the email
 paperfind digest -k 20
@@ -330,7 +326,7 @@ database with two schemas (`daily`, `zotero`). To store embeddings in Postgres, 
 
 | File/Directory | Created By | Description |
 |----------------|------------|-------------|
-| `daily_papers.db` | `paperfind fetch` | SQLite database (default) of harvested papers from CrossRef, bioRxiv, medRxiv, arXiv |
+| `daily_papers.db` | `paperfind fetch` | SQLite database (default) of harvested papers from CrossRef, bioRxiv, medRxiv, arXiv, ChemRxiv |
 | `zotero_meta.db` | `paperfind sync` | SQLite database (default) of your Zotero library (libraries, items, collections, tags) |
 | `chroma_store_<provider>_<model>/` | `paperfind fetch --rebuild-vectors` | ChromaDB vector embeddings for daily papers |
 | `zotero_vectors_<provider>_<model>/` | `paperfind embed` | ChromaDB vector embeddings for Zotero items |
@@ -345,8 +341,6 @@ database with two schemas (`daily`, `zotero`). To store embeddings in Postgres, 
 | `paperfind fetch` | **Upserts** papers (updates existing records, adds new ones). Running daily accumulates papers over time. |
 | `paperfind fetch --rebuild-vectors` | Fetches papers (upsert), then **recreates** the entire vector store from the database. |
 | `paperfind fetch --vectors-only` | **Recreates** the vector store from existing database without fetching new papers. |
-| `paperfind recommend` | Read-only. Queries existing databases. Creates output file only if `-o` specified. |
-| `paperfind search` | Read-only. Queries existing vector stores. |
 
 For database schema details, see [src/README.md](src/README.md#database-schemas).
 

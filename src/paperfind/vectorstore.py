@@ -523,3 +523,24 @@ def _json_default(value: Any) -> str:
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return str(value)
+
+
+def get_existing_ids(vectordb: VectorStore) -> set:
+    """Get all existing document IDs from the vector store.
+
+    Returns a set of IDs for efficient lookup.
+    """
+    # PGVectorStore has native method
+    if isinstance(vectordb, PGVectorStore):
+        return set(vectordb.list_ids())
+
+    # Chroma: use _collection.get()
+    if hasattr(vectordb, "_collection"):
+        try:
+            result = vectordb._collection.get(include=[])
+            if result and result.get("ids"):
+                return set(result["ids"])
+        except Exception as exc:
+            logger.warning(f"Failed to get IDs from Chroma: {exc}")
+
+    return set()

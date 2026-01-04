@@ -1,7 +1,7 @@
 """
 fetch_papers.py
 
-Unified script to fetch papers from all sources: CrossRef, bioRxiv, medRxiv, and arXiv.
+Unified script to fetch papers from all sources: CrossRef, bioRxiv, medRxiv, arXiv, and ChemRxiv.
 
 Usage:
     paperfind fetch                    # Fetch from all sources (today)
@@ -18,6 +18,7 @@ from paperfind.config import DAILY_PAPERS_DB
 from paperfind.fetchers.db import init_db, upsert_work
 from paperfind.fetchers.sources.arxiv import ARXIV_CATEGORIES, fetch_arxiv
 from paperfind.fetchers.sources.biorxiv import BIORXIV_CATEGORIES, fetch_biorxiv
+from paperfind.fetchers.sources.chemrxiv import fetch_chemrxiv
 from paperfind.fetchers.sources.crossref import fetch_crossref
 from paperfind.fetchers.vector import rebuild_vectors, upsert_vectors_for_dois
 from paperfind.logging import get_logger
@@ -31,8 +32,7 @@ logger = get_logger(__name__)
 def fetch_all(
     days: int = 1,
     sources: Optional[List[str]] = None,
-    biorxiv_category: Optional[str] = None,
-    medrxiv_category: Optional[str] = None,
+    arxiv_days: Optional[int] = None,
 ) -> Tuple[Dict[str, int], List[str]]:
     """
     Fetch papers from all sources.
@@ -40,12 +40,18 @@ def fetch_all(
     Args:
         days: Number of days to fetch
         sources: List of sources to fetch from (default: all)
+        arxiv_days: Number of days to fetch for arXiv (default: same as days).
+                    Useful since arXiv has batch processing delays.
 
     Returns:
         Tuple of (counts by source, list of fetched DOIs)
+
+    Note:
+        Categories are configured via environment variables:
+        ARXIV_CATEGORIES, BIORXIV_CATEGORIES (see .env.example)
     """
     if sources is None:
-        sources = ["crossref", "biorxiv", "medrxiv", "arxiv"]
+        sources = ["crossref", "biorxiv", "medrxiv", "arxiv", "chemrxiv"]
     if days < 1:
         raise ValueError("days must be >= 1")
 
@@ -77,44 +83,57 @@ def fetch_all(
     # bioRxiv
     if "biorxiv" in sources:
         logger.info("[bioRxiv] Fetching preprints...")
-        papers = fetch_biorxiv(
-            start_date,
-            end_date,
-            "biorxiv",
-            category=biorxiv_category,
-        )
-        for paper in papers:
+        biorxiv_papers = []
+        if BIORXIV_CATEGORIES:
+            # Fetch specific categories
+            for category in BIORXIV_CATEGORIES:
+                papers = fetch_biorxiv(start_date, end_date, "biorxiv", category=category)
+                biorxiv_papers.extend(papers)
+                logger.debug(f"    {category}: {len(papers)} papers")
+        else:
+            # No category filter - fetch all
+            logger.debug("    (all categories)")
+            biorxiv_papers = fetch_biorxiv(start_date, end_date, "biorxiv")
+
+        for paper in biorxiv_papers:
             upsert_work(conn, paper)
             fetched_dois.append(paper["doi"])
         conn.commit()
 
-        counts["biorxiv"] = len(papers)
-        logger.info(f"    Stored {len(papers)} preprints")
+        counts["biorxiv"] = len(biorxiv_papers)
+        logger.info(f"    Total: {len(biorxiv_papers)} preprints")
 
     # medRxiv
     if "medrxiv" in sources:
         logger.info("[medRxiv] Fetching preprints...")
-        papers = fetch_biorxiv(
-            start_date,
-            end_date,
-            "medrxiv",
-            category=medrxiv_category,
-        )
-        for paper in papers:
+        medrxiv_papers = []
+        if BIORXIV_CATEGORIES:
+            # Fetch specific categories
+            for category in BIORXIV_CATEGORIES:
+                papers = fetch_biorxiv(start_date, end_date, "medrxiv", category=category)
+                medrxiv_papers.extend(papers)
+                logger.debug(f"    {category}: {len(papers)} papers")
+        else:
+            # No category filter - fetch all
+            logger.debug("    (all categories)")
+            medrxiv_papers = fetch_biorxiv(start_date, end_date, "medrxiv")
+
+        for paper in medrxiv_papers:
             upsert_work(conn, paper)
             fetched_dois.append(paper["doi"])
         conn.commit()
 
-        counts["medrxiv"] = len(papers)
-        logger.info(f"    Stored {len(papers)} preprints")
+        counts["medrxiv"] = len(medrxiv_papers)
+        logger.info(f"    Total: {len(medrxiv_papers)} preprints")
 
     # arXiv
     if "arxiv" in sources:
-        logger.info("[arXiv] Fetching preprints...")
+        arxiv_days_to_use = arxiv_days if arxiv_days is not None else days
+        logger.info(f"[arXiv] Fetching preprints (last {arxiv_days_to_use} days)...")
         arxiv_papers = []
 
         for category in ARXIV_CATEGORIES:
-            papers = fetch_arxiv(category, days=days)
+            papers = fetch_arxiv(category, days=arxiv_days_to_use)
             arxiv_papers.extend(papers)
             logger.debug(f"    {category}: {len(papers)} papers")
             time.sleep(1)  # Rate limiting
@@ -127,15 +146,27 @@ def fetch_all(
         counts["arxiv"] = len(arxiv_papers)
         logger.info(f"    Total: {len(arxiv_papers)} preprints")
 
+    # ChemRxiv
+    if "chemrxiv" in sources:
+        logger.info("[ChemRxiv] Fetching preprints...")
+        chemrxiv_papers = fetch_chemrxiv(start_date, end_date)
+
+        for paper in chemrxiv_papers:
+            upsert_work(conn, paper)
+            fetched_dois.append(paper["doi"])
+        conn.commit()
+
+        counts["chemrxiv"] = len(chemrxiv_papers)
+        logger.info(f"    Total: {len(chemrxiv_papers)} preprints")
+
     conn.close()
     return counts, fetched_dois
 
 
 def run_fetch(
     days: int = 1,
+    arxiv_days: Optional[int] = None,
     sources: Optional[List[str]] = None,
-    biorxiv_category: Optional[str] = None,
-    medrxiv_category: Optional[str] = None,
     rebuild_vectors_flag: bool = False,
     vectors_only: bool = False,
 ) -> None:
@@ -154,8 +185,7 @@ def run_fetch(
     counts, fetched_dois = fetch_all(
         days=days,
         sources=sources,
-        biorxiv_category=biorxiv_category,
-        medrxiv_category=medrxiv_category,
+        arxiv_days=arxiv_days,
     )
 
     logger.info("=" * 50)

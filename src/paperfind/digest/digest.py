@@ -16,7 +16,7 @@ from paperfind.config import EMAIL_FROM, EMAIL_TO, SMTP_PASSWORD, SMTP_USER
 from paperfind.digest.email import send_email
 from paperfind.digest.template import render_digest
 from paperfind.fetchers.fetch_papers import fetch_all
-from paperfind.fetchers.vector import rebuild_vectors
+from paperfind.fetchers.vector import upsert_vectors_for_dois
 from paperfind.logging import get_logger
 from paperfind.search.recommend import get_recommendations
 
@@ -25,22 +25,27 @@ logger = get_logger(__name__)
 
 def run_digest(
     days: int = 1,
+    arxiv_days: Optional[int] = None,
     num_recommendations: int = 10,
     collection: Optional[str] = None,
     dry_run: bool = False,
     skip_fetch: bool = False,
     rerank: bool = True,
+    max_age_days: Optional[int] = None,
 ) -> None:
     """
     Run the full digest pipeline: fetch papers, generate recommendations, send email.
 
     Args:
         days: Number of days to fetch papers for
+        arxiv_days: Number of days to fetch for arXiv (default: same as days).
+                    Useful since arXiv has batch processing delays.
         num_recommendations: Number of recommendations to include
         collection: Optional Zotero collection to base recommendations on
         dry_run: If True, print HTML instead of sending email
         skip_fetch: If True, skip fetching and use existing papers
         rerank: If True, use cross-encoder reranking (default: True)
+        max_age_days: Only recommend papers published within this many days
     """
     today = date.today()
 
@@ -52,13 +57,13 @@ def run_digest(
         logger.info("=" * 50)
         logger.info(f"Step 1: Fetching papers from last {days} day(s)")
         logger.info("=" * 50)
-        fetch_all(days=days)
+        counts, fetched_dois = fetch_all(days=days, arxiv_days=arxiv_days)
 
-        # Step 2: Rebuild vector embeddings
+        # Step 2: Update vector embeddings (incremental - skips existing)
         logger.info("=" * 50)
-        logger.info("Step 2: Rebuilding vector embeddings")
+        logger.info("Step 2: Updating vector embeddings")
         logger.info("=" * 50)
-        rebuild_vectors()
+        upsert_vectors_for_dois(sorted(set(fetched_dois)))
     else:
         logger.info("Skipping fetch, using existing papers...")
 
@@ -71,6 +76,7 @@ def run_digest(
         collection=collection,
         rerank=rerank,
         return_rerank_used=True,
+        max_age_days=max_age_days,
     )
 
     if not recommendations:
