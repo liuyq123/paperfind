@@ -19,16 +19,20 @@ class TestModuleImports:
         """Ensure Zotero module exports are importable."""
         from paperfind.fetchers.zotero import (
             run_sync,
-            sync_project,
+            run_embed,
+            sync_library,
+            embed_collection,
             list_collections,
-            rebuild_all_vectors,
             init_db,
             get_conn,
-            get_or_create_project,
+            get_or_create_library,
+            get_all_collections,
+            get_items_for_collection,
+            get_collection_by_name_or_key,
             fetch_collections,
-            fetch_items_for_project,
+            fetch_library_items,
             get_vectordb,
-            rebuild_vectors_for_project,
+            embed_items,
         )
 
     def test_digest_module_imports(self):
@@ -80,8 +84,18 @@ class TestCLICommands:
             text=True,
         )
         assert result.returncode == 0
-        assert "--collection" in result.stdout
         assert "--list-collections" in result.stdout
+
+    def test_embed_help(self):
+        """Test that embed --help works."""
+        result = subprocess.run(
+            ["paperfind", "embed", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "collection" in result.stdout
+        assert "--force" in result.stdout
 
     def test_fetch_help(self):
         """Test that fetch --help works."""

@@ -416,18 +416,16 @@ def recommend(
 # =============================================================================
 
 
-def _run_sync(job: JobState, collection: Optional[str]) -> None:
+def _run_sync(job: JobState) -> None:
     """Background task to run Zotero sync."""
-    from paperfind.fetchers.zotero.sync import sync_project
+    from paperfind.fetchers.zotero.sync import sync_library
 
     job.status = "running"
     try:
-        project_name = collection or "default"
-        project_id = sync_project(project_name, collection_name=collection)
+        num_items = sync_library()
         job.result = {
-            "project_id": project_id,
-            "collection": collection,
-            "message": f"Synced successfully to project '{project_name}'",
+            "num_items": num_items,
+            "message": f"Synced {num_items} items from Zotero library",
         }
         job.status = "completed"
     except Exception as e:
@@ -468,12 +466,36 @@ def _run_fetch(
         job.completed_at = datetime.now(timezone.utc).isoformat()
 
 
+def _run_embed(job: JobState, collection: str, force: bool) -> None:
+    """Background task to embed a Zotero collection."""
+    from paperfind.fetchers.zotero.sync import embed_collection
+
+    job.status = "running"
+    try:
+        num_embedded = embed_collection(collection, force=force)
+        job.result = {
+            "collection": collection,
+            "num_embedded": num_embedded,
+            "force": force,
+            "message": f"Embedded {num_embedded} items from collection '{collection}'",
+        }
+        job.status = "completed"
+    except Exception as e:
+        job.error = str(e)
+        job.status = "failed"
+    finally:
+        job.completed_at = datetime.now(timezone.utc).isoformat()
+
+
 @app.post("/sync", response_model=JobResponse)
 def sync(
     background_tasks: BackgroundTasks,
-    collection: Optional[str] = Query(default=None, description="Zotero collection to sync"),
 ) -> JobResponse:
-    """Trigger Zotero library sync as a background job."""
+    """Trigger Zotero library sync as a background job.
+
+    Syncs your entire Zotero library. To embed a specific collection
+    for semantic search, use the embed command after syncing.
+    """
     from paperfind.config import ZOTERO_API_KEY, ZOTERO_USER_ID
 
     if not ZOTERO_API_KEY or not ZOTERO_USER_ID:
@@ -483,7 +505,24 @@ def sync(
         )
 
     job = _create_job("sync")
-    background_tasks.add_task(_run_sync, job, collection)
+    background_tasks.add_task(_run_sync, job)
+
+    return JobResponse(job_id=job.job_id, status=job.status, job_type=job.job_type)
+
+
+@app.post("/embed", response_model=JobResponse)
+def embed(
+    background_tasks: BackgroundTasks,
+    collection: str = Query(..., min_length=1, description="Collection name or key to embed"),
+    force: bool = Query(default=False, description="Re-embed all items (ignore existing)"),
+) -> JobResponse:
+    """Embed a Zotero collection for semantic search.
+
+    Creates vector embeddings for items in the specified collection.
+    Items already embedded are skipped unless force=True.
+    """
+    job = _create_job("embed")
+    background_tasks.add_task(_run_embed, job, collection, force)
 
     return JobResponse(job_id=job.job_id, status=job.status, job_type=job.job_type)
 

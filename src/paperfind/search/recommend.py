@@ -66,17 +66,34 @@ def _check_zotero_db() -> bool:
     return True
 
 
-def get_project_id_by_name(collection_name: str) -> Optional[int]:
-    """Look up project_id by collection name."""
+def get_collection_id_by_name(collection_name: str) -> Optional[int]:
+    """Look up collection id by collection name or key."""
     conn = get_conn(ZOTERO_SCHEMA)
     cur = conn.cursor()
-    table = qualify_table(ZOTERO_SCHEMA, "projects")
+    table = qualify_table(ZOTERO_SCHEMA, "collections")
     ph = placeholder()
+
+    # Try by key first
     cur.execute(
-        f"SELECT id FROM {table} WHERE name = {ph} OR collection_name = {ph}",
-        (collection_name, collection_name)
+        f"SELECT id FROM {table} WHERE collection_key = {ph}",
+        (collection_name,)
     )
     row = cur.fetchone()
+
+    if not row:
+        # Try by name (case-insensitive)
+        if is_postgres():
+            cur.execute(
+                f"SELECT id FROM {table} WHERE LOWER(name) = LOWER({ph})",
+                (collection_name,)
+            )
+        else:
+            cur.execute(
+                f"SELECT id FROM {table} WHERE LOWER(name) = LOWER({ph})",
+                (collection_name,)
+            )
+        row = cur.fetchone()
+
     conn.close()
     return row["id"] if row else None
 
@@ -88,22 +105,28 @@ def get_zotero_papers(collection: Optional[str] = None) -> List[ZoteroPaper]:
 
     conn = get_conn(ZOTERO_SCHEMA)
     cur = conn.cursor()
-    table = qualify_table(ZOTERO_SCHEMA, "items")
+    items_table = qualify_table(ZOTERO_SCHEMA, "items")
+    item_collections_table = qualify_table(ZOTERO_SCHEMA, "item_collections")
     ph = placeholder()
 
     if collection:
-        project_id = get_project_id_by_name(collection)
-        if project_id:
+        collection_id = get_collection_id_by_name(collection)
+        if collection_id:
             cur.execute(
-                f"SELECT title, abstract, doi FROM {table} WHERE project_id = {ph}",
-                (project_id,)
+                f"""
+                SELECT i.title, i.abstract, i.doi
+                FROM {items_table} i
+                JOIN {item_collections_table} ic ON i.id = ic.item_id
+                WHERE ic.collection_id = {ph}
+                """,
+                (collection_id,)
             )
         else:
             logger.warning(f"Collection '{collection}' not found.")
             conn.close()
             return []
     else:
-        cur.execute(f"SELECT title, abstract, doi FROM {table}")
+        cur.execute(f"SELECT title, abstract, doi FROM {items_table}")
 
     papers = [dict(row) for row in cur.fetchall()]
     conn.close()

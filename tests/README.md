@@ -14,10 +14,11 @@ pip install -e ".[dev]"
 
 | File | Description | Requires API? |
 |------|-------------|---------------|
+| `test_cli.py` | Module imports and CLI help commands | No |
 | `test_documents.py` | Metadata-first title/abstract extraction and fallbacks | No |
 | `test_formatting.py` | Console/markdown formatting uses metadata fields | No |
 | `test_digest_template.py` | HTML digest uses metadata and link formatting | No |
-| `test_api_integration.py` | API handlers with mocked HTTP backends | No |
+| `test_api_integration.py` | API handlers with mocked HTTP backends | Requires `[api]` |
 
 ## How to Run
 

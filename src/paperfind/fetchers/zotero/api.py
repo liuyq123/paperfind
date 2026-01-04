@@ -119,6 +119,41 @@ def fetch_items_for_project(
     return items
 
 
+def fetch_library_items(
+    library_id: str,
+    api_key: str,
+    library_type: str = "user",
+    limit: int = 100,
+) -> List[ZoteroItem]:
+    """Fetch all items from Zotero library (entire library, not a specific collection)."""
+    root = _zotero_base(library_id, library_type)
+    headers = {"Zotero-API-Key": api_key}
+    items: List[ZoteroItem] = []
+    start = 0
+
+    while True:
+        params = {
+            "format": "json",
+            "limit": limit,
+            "start": start,
+            "sort": "dateModified",
+            "direction": "asc",
+        }
+        url = f"{root}/items"
+
+        r = requests.get(url, headers=headers, params=params, timeout=30)
+        r.raise_for_status()
+        batch = r.json()
+        if not batch:
+            break
+        items.extend(batch)
+        if len(batch) < limit:
+            break
+        start += limit
+
+    return items
+
+
 def zotero_item_to_row(item: ZoteroItem) -> ZoteroItemRow:
     """Convert Zotero API item to database row."""
     data = item.get("data", {})
@@ -141,6 +176,8 @@ def zotero_item_to_row(item: ZoteroItem) -> ZoteroItemRow:
     item_type = data.get("itemType") or None
     zotero_key = data.get("key")
     tags = [t.get("tag") for t in data.get("tags", []) if t.get("tag")]
+    # Collection keys this item belongs to
+    collections = data.get("collections", [])
 
     return {
         "zotero_key": zotero_key,
@@ -152,4 +189,5 @@ def zotero_item_to_row(item: ZoteroItem) -> ZoteroItemRow:
         "url": url,
         "item_type": item_type,
         "tags": tags,
+        "collections": collections,
     }

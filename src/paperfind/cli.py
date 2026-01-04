@@ -2,7 +2,8 @@
 Command-line interface for Paperfind.
 
 Usage:
-    paperfind sync                     # Sync Zotero library
+    paperfind sync                     # Sync entire Zotero library
+    paperfind embed "collection"       # Embed items in a collection
     paperfind fetch                    # Fetch papers from all sources
     paperfind recommend                # Get paper recommendations
     paperfind search "query"           # Semantic search
@@ -40,11 +41,17 @@ def main() -> None:
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    # Sync command
+    # Sync command (always syncs entire library)
     sync_parser = subparsers.add_parser("sync", help="Sync Zotero library to local database")
-    sync_parser.add_argument("--collection", type=str, help="Sync a specific collection by name")
     sync_parser.add_argument(
         "--list-collections", action="store_true", help="List all collections in your library"
+    )
+
+    # Embed command
+    embed_parser = subparsers.add_parser("embed", help="Embed Zotero collection for semantic search")
+    embed_parser.add_argument("collection", type=str, help="Collection name or key to embed")
+    embed_parser.add_argument(
+        "--force", action="store_true", help="Re-embed all items (ignore existing embeddings)"
     )
 
     # Fetch command
@@ -120,7 +127,7 @@ def main() -> None:
     )
     search_parser.add_argument("--rag", action="store_true", help="Use RAG to answer the query")
     search_parser.add_argument("--scores", action="store_true", help="Show similarity scores")
-    search_parser.add_argument("--project-id", type=int, help="Filter by Zotero project ID")
+    search_parser.add_argument("--collection", type=str, help="Filter by Zotero collection")
 
     # Config command
     config_parser = subparsers.add_parser("config", help="Show configuration info")
@@ -143,6 +150,11 @@ def main() -> None:
     digest_parser.add_argument(
         "--skip-fetch", action="store_true", help="Skip fetching, use existing papers"
     )
+    digest_parser.add_argument(
+        "--no-rerank",
+        action="store_true",
+        help="Disable cross-encoder reranking",
+    )
 
     args = parser.parse_args()
 
@@ -164,7 +176,12 @@ def main() -> None:
     if args.command == "sync":
         from paperfind.fetchers.zotero.sync import run_sync
 
-        run_sync(args.collection, args.list_collections)
+        run_sync(args.list_collections)
+
+    elif args.command == "embed":
+        from paperfind.fetchers.zotero.sync import run_embed
+
+        run_embed(args.collection, args.force)
 
     elif args.command == "fetch":
         from paperfind.fetchers.fetch_papers import run_fetch
@@ -198,7 +215,7 @@ def main() -> None:
             source=args.source,
             rag=args.rag,
             scores=args.scores,
-            project_id=args.project_id,
+            collection=args.collection,
         )
 
     elif args.command == "config":
@@ -222,6 +239,7 @@ def main() -> None:
             collection=args.collection,
             dry_run=args.dry_run,
             skip_fetch=args.skip_fetch,
+            rerank=not args.no_rerank,
         )
 
 

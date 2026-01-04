@@ -29,6 +29,7 @@ def run_digest(
     collection: Optional[str] = None,
     dry_run: bool = False,
     skip_fetch: bool = False,
+    rerank: bool = True,
 ) -> None:
     """
     Run the full digest pipeline: fetch papers, generate recommendations, send email.
@@ -39,6 +40,7 @@ def run_digest(
         collection: Optional Zotero collection to base recommendations on
         dry_run: If True, print HTML instead of sending email
         skip_fetch: If True, skip fetching and use existing papers
+        rerank: If True, use cross-encoder reranking (default: True)
     """
     today = date.today()
 
@@ -64,6 +66,7 @@ def run_digest(
     recommendations, rerank_used = get_recommendations(
         k=num_recommendations,
         collection=collection,
+        rerank=rerank,
         return_rerank_used=True,
     )
 

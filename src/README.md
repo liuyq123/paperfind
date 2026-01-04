@@ -53,11 +53,13 @@ src/
 | `type` | Article type (journal-article, preprint, etc.) |
 | `source` | Fetch source (crossref, biorxiv, arxiv, etc.) |
 
-**zotero_meta.db** (tables: `projects`, `items`, `tags`)
+**zotero_meta.db** (tables: `libraries`, `collections`, `items`, `item_collections`, `tags`)
 | Table | Description |
 |-------|-------------|
-| `projects` | Zotero collections/libraries synced |
-| `items` | Papers with metadata (zotero_key, title, authors, abstract, DOI, date, URL) |
+| `libraries` | Zotero libraries synced (user or group libraries) |
+| `collections` | Zotero collections within each library |
+| `items` | Papers with metadata (zotero_key, title, authors, abstract, DOI, date, URL) - unique per library |
+| `item_collections` | Many-to-many relationship linking items to collections |
 | `tags` | Research tags for organization |
 
 ### Postgres (optional)
@@ -67,7 +69,7 @@ When `PAPERFIND_DB_URL` is set, data is stored in a single Postgres database wit
 | Schema | Tables | Description |
 |--------|--------|-------------|
 | `daily` | `works` | Same columns as `daily_papers.db` |
-| `zotero` | `projects`, `items`, `tags` | Same as `zotero_meta.db` |
+| `zotero` | `libraries`, `collections`, `items`, `item_collections`, `tags` | Same as `zotero_meta.db` |
 
 ### ChromaDB (default vector store)
 

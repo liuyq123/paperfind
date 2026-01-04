@@ -1,12 +1,15 @@
+import importlib
 import pytest
 from langchain_core.documents import Document
 
 pytest.importorskip("fastapi")
 
 from paperfind.api import recommend, search_papers
-import paperfind.search.recommend as recommend_module
-import paperfind.search.search as search_module
 import paperfind.search.utils as utils_module
+
+# Import modules directly to avoid name shadowing from __init__.py
+search_module = importlib.import_module("paperfind.search.search")
+recommend_module = importlib.import_module("paperfind.search.recommend")
 
 
 def test_search_papers_uses_metadata(monkeypatch: pytest.MonkeyPatch) -> None:

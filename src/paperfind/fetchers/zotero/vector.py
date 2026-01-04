@@ -1,14 +1,11 @@
 """Vector database functions for Zotero sync."""
 
-from typing import List
+from typing import Any, Dict, List, Set
 
 from langchain_core.documents import Document
 
-from paperfind.db import ZOTERO_SCHEMA, placeholder, qualify_table
 from paperfind.logging import get_logger
 from paperfind.vectorstore import get_vector_store
-
-from .db import get_conn
 
 logger = get_logger(__name__)
 
@@ -18,72 +15,147 @@ def get_vectordb():
     return get_vector_store("zotero")
 
 
-def build_docs_for_project(project_id: int) -> List[Document]:
-    """Build LangChain documents from project items."""
-    conn = get_conn()
-    cur = conn.cursor()
-    items_table = qualify_table(ZOTERO_SCHEMA, "items")
-    tags_table = qualify_table(ZOTERO_SCHEMA, "tags")
-    ph = placeholder()
-    cur.execute(
-        f"""
-        SELECT id, zotero_key, title, authors, abstract
-        FROM {items_table}
-        WHERE project_id = {ph}
-        """,
-        (project_id,),
-    )
-    rows = cur.fetchall()
+def build_document_for_item(item: Dict[str, Any]) -> Document:
+    """Build a LangChain document from an item dict."""
+    zotero_key = item["zotero_key"]
+    title = item.get("title") or ""
+    authors = item.get("authors") or ""
+    abstract = item.get("abstract") or ""
+    tags = item.get("tags", [])
 
-    docs: List[Document] = []
+    parts = [title]
+    if abstract:
+        parts.append(f"Abstract: {abstract}")
+    if tags:
+        parts.append("Tags: " + ", ".join(tags))
+    page_content = "\n\n".join(parts).strip()
 
-    for row in rows:
-        item_id = row["id"]
-        zotero_key = row["zotero_key"]
-        title = row["title"]
-        authors = row["authors"]
-        abstract = row["abstract"]
-        # Fetch tags
-        cur.execute(f"SELECT tag FROM {tags_table} WHERE item_id = {ph}", (item_id,))
-        tags = [r["tag"] for r in cur.fetchall()]
+    metadata = {
+        "zotero_key": zotero_key,
+        "title": title,
+        "authors": authors,
+        "abstract": abstract,
+    }
 
-        parts = [title or ""]
-        if abstract:
-            parts.append(f"Abstract: {abstract}")
-        if tags:
-            parts.append("Tags: " + ", ".join(tags))
-        page_content = "\n\n".join(parts).strip()
-        if not page_content:
-            continue
-
-        metadata = {
-            "project_id": project_id,
-            "item_id": item_id,
-            "zotero_key": zotero_key,
-            "title": title,
-            "authors": authors,
-            "abstract": abstract,
-        }
-        docs.append(Document(page_content=page_content, metadata=metadata))
-
-    conn.close()
-    return docs
+    return Document(page_content=page_content, metadata=metadata)
 
 
-def rebuild_vectors_for_project(project_id: int) -> int:
-    """Rebuild vector embeddings for a project."""
+def get_embedded_zotero_keys() -> Set[str]:
+    """Get set of zotero_keys that are already embedded in the vector store."""
+    try:
+        vectordb = get_vectordb()
+    except (ImportError, ValueError) as exc:
+        logger.error(str(exc))
+        return set()
+
+    # Get all documents from the vector store
+    # For Chroma, we can use get() to retrieve all
+    try:
+        # Try to get all IDs (which are zotero_keys now)
+        result = vectordb.get()
+        if result and "ids" in result:
+            return set(result["ids"])
+    except Exception:
+        pass
+
+    return set()
+
+
+def is_item_embedded(zotero_key: str) -> bool:
+    """Check if an item is already embedded in the vector store."""
+    try:
+        vectordb = get_vectordb()
+        result = vectordb.get(ids=[zotero_key])
+        return bool(result and result.get("ids"))
+    except Exception:
+        return False
+
+
+def embed_items(items: List[Dict[str, Any]], skip_existing: bool = True) -> int:
+    """
+    Embed items to the vector store.
+
+    Args:
+        items: List of item dicts from the database
+        skip_existing: If True, skip items that are already embedded
+
+    Returns:
+        Number of items embedded.
+    """
     try:
         vectordb = get_vectordb()
     except (ImportError, ValueError) as exc:
         logger.error(str(exc))
         return 0
 
-    # Delete existing vectors for this project
-    vectordb.delete(where={"project_id": project_id})
+    # Get already embedded keys if skipping existing
+    existing_keys: Set[str] = set()
+    if skip_existing:
+        existing_keys = get_embedded_zotero_keys()
+        if existing_keys:
+            logger.info(f"Found {len(existing_keys)} items already embedded")
 
-    docs = build_docs_for_project(project_id)
-    if docs:
-        ids = [str(doc.metadata["item_id"]) for doc in docs]
-        vectordb.add_documents(docs, ids=ids)
+    # Filter and build documents
+    docs_to_embed: List[Document] = []
+    ids_to_embed: List[str] = []
 
-    return len(docs)
+    for item in items:
+        zotero_key = item["zotero_key"]
+
+        # Skip if already embedded
+        if skip_existing and zotero_key in existing_keys:
+            continue
+
+        # Skip items without content
+        if not item.get("title") and not item.get("abstract"):
+            continue
+
+        doc = build_document_for_item(item)
+        docs_to_embed.append(doc)
+        ids_to_embed.append(zotero_key)
+
+    if not docs_to_embed:
+        logger.info("No new items to embed")
+        return 0
+
+    # Embed in batches
+    batch_size = 100
+    total_embedded = 0
+
+    for i in range(0, len(docs_to_embed), batch_size):
+        batch_docs = docs_to_embed[i : i + batch_size]
+        batch_ids = ids_to_embed[i : i + batch_size]
+
+        try:
+            vectordb.add_documents(batch_docs, ids=batch_ids)
+            total_embedded += len(batch_docs)
+            logger.info(f"Embedded {total_embedded}/{len(docs_to_embed)} items")
+        except Exception as exc:
+            logger.error(f"Error embedding batch: {exc}")
+            continue
+
+    return total_embedded
+
+
+def delete_item_embeddings(zotero_keys: List[str]) -> int:
+    """
+    Delete embeddings for specific items.
+
+    Args:
+        zotero_keys: List of zotero_keys to delete
+
+    Returns:
+        Number of embeddings deleted.
+    """
+    try:
+        vectordb = get_vectordb()
+    except (ImportError, ValueError) as exc:
+        logger.error(str(exc))
+        return 0
+
+    try:
+        vectordb.delete(ids=zotero_keys)
+        return len(zotero_keys)
+    except Exception as exc:
+        logger.error(f"Error deleting embeddings: {exc}")
+        return 0

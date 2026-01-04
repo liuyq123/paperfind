@@ -10,7 +10,7 @@ Usage:
     paperfind search "your query" -k 10
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -18,12 +18,49 @@ from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 from paperfind.config import LLM_MODEL
+from paperfind.db import ZOTERO_SCHEMA, get_conn, placeholder, qualify_table
 from paperfind.logging import get_logger
 from paperfind.search.formatting import format_document
 from paperfind.search.utils import check_vector_store, warn_if_empty
 from paperfind.vectorstore import get_vector_store
 
 logger = get_logger(__name__)
+
+
+def get_collection_zotero_keys(collection_name: str) -> Set[str]:
+    """Get all zotero_keys in a collection."""
+    conn = get_conn(ZOTERO_SCHEMA)
+    cur = conn.cursor()
+    collections_table = qualify_table(ZOTERO_SCHEMA, "collections")
+    items_table = qualify_table(ZOTERO_SCHEMA, "items")
+    item_collections_table = qualify_table(ZOTERO_SCHEMA, "item_collections")
+    ph = placeholder()
+
+    # Find collection ID by name or key
+    cur.execute(
+        f"SELECT id FROM {collections_table} WHERE collection_key = {ph} OR LOWER(name) = LOWER({ph})",
+        (collection_name, collection_name)
+    )
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return set()
+
+    collection_id = row["id"]
+
+    # Get zotero_keys in collection
+    cur.execute(
+        f"""
+        SELECT i.zotero_key
+        FROM {items_table} i
+        JOIN {item_collections_table} ic ON i.id = ic.item_id
+        WHERE ic.collection_id = {ph}
+        """,
+        (collection_id,)
+    )
+    keys = {r["zotero_key"] for r in cur.fetchall()}
+    conn.close()
+    return keys
 
 def get_vectordb(source: str = "daily_papers"):
     """Get the appropriate vector database based on source."""
@@ -34,7 +71,7 @@ def search(
     query: str,
     k: int = 5,
     source: str = "daily_papers",
-    project_id: Optional[int] = None,
+    collection: Optional[str] = None,
 ) -> List[Document]:
     """
     Perform semantic search on the paper database.
@@ -43,7 +80,7 @@ def search(
         query: Search query string
         k: Number of results to return
         source: "daily_papers" or "zotero"
-        project_id: Filter by project ID (zotero only)
+        collection: Filter by Zotero collection (zotero source only)
 
     Returns:
         List of matching documents
@@ -51,11 +88,25 @@ def search(
     vectordb = get_vectordb(source)
     warn_if_empty(vectordb, source)
 
-    search_kwargs = {"k": k}
-    if project_id is not None and source == "zotero":
-        search_kwargs["filter"] = {"project_id": project_id}
+    # If filtering by collection, get allowed zotero_keys
+    allowed_keys: Optional[Set[str]] = None
+    if collection and source == "zotero":
+        allowed_keys = get_collection_zotero_keys(collection)
+        if not allowed_keys:
+            logger.warning(f"Collection '{collection}' not found or empty.")
+            return []
 
-    results = vectordb.similarity_search(query, **search_kwargs)
+    # Search with more results if filtering
+    search_k = k * 3 if allowed_keys else k
+    results = vectordb.similarity_search(query, k=search_k)
+
+    # Filter by collection if needed
+    if allowed_keys:
+        results = [
+            doc for doc in results
+            if doc.metadata.get("zotero_key") in allowed_keys
+        ][:k]
+
     return results
 
 
@@ -136,7 +187,7 @@ def run_search(
     source: str = "daily_papers",
     rag: bool = False,
     scores: bool = False,
-    project_id: Optional[int] = None,
+    collection: Optional[str] = None,
 ) -> None:
     """Run semantic search with parsed parameters."""
     if not check_vector_store(source):
@@ -158,7 +209,7 @@ def run_search(
                 query,
                 k=num_results,
                 source=source,
-                project_id=project_id,
+                collection=collection,
             )
             for i, doc in enumerate(results):
                 print(format_document(doc, rank=i + 1))

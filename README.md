@@ -14,6 +14,7 @@ A paper recommendation system that discovers relevant papers and preprints based
 - [Usage](#usage)
   - [Quick Start: Get Today's Recommendations](#quick-start-get-todays-recommendations)
   - [Sync Zotero Library](#sync-zotero-library)
+  - [Embed Collections](#embed-collections)
   - [Get Recommendations](#get-recommendations)
   - [Fetch Papers](#fetch-papers)
   - [Email Digest](#email-digest)
@@ -108,29 +109,41 @@ This shows your data directory path. Your `.env` file should be in that director
 ### Quick Start: Get Today's Recommendations
 
 ```bash
-# 1. Sync your Zotero library
+# 1. Sync your Zotero library (syncs entire library)
 paperfind sync
 
-# 2. Fetch today's papers and build embeddings
+# 2. Embed a specific collection for semantic search
+paperfind embed "my research collection"
+
+# 3. Fetch today's papers and build embeddings
 paperfind fetch --rebuild-vectors
 
-# 3. Get personalized recommendations based on your Zotero library
+# 4. Get personalized recommendations based on your Zotero library
 paperfind recommend
 ```
 
 ### Sync Zotero Library
 
-Sync your Zotero library to get personalized recommendations:
+Sync your Zotero library to get personalized recommendations. The sync command always syncs your **entire library**, storing each item once and tracking collection memberships via a many-to-many relationship.
 
 ```bash
 # List available collections in your Zotero library
 paperfind sync --list-collections
 
-# Sync your entire library
+# Sync your entire library (items, collections, and memberships)
 paperfind sync
+```
 
-# Sync a specific collection
-paperfind sync --collection "active learning"
+### Embed Collections
+
+After syncing, embed specific collections for semantic search. Embeddings are keyed by Zotero item key, so each paper is only embedded once even if it appears in multiple collections.
+
+```bash
+# Embed items in a specific collection
+paperfind embed "active learning"
+
+# Re-embed all items (ignore existing embeddings)
+paperfind embed "active learning" --force
 ```
 
 ### Get Recommendations
@@ -285,7 +298,8 @@ uvicorn paperfind.api:app --reload
 | GET | `/search?query=...` | Semantic search (supports `scores`, `rag`, `source` params) |
 | GET | `/papers` | List fetched papers (paginated) |
 | GET | `/recommend` | Get paper recommendations |
-| POST | `/sync` | Trigger Zotero sync (background job) |
+| POST | `/sync` | Trigger Zotero library sync (background job) |
+| POST | `/embed?collection=...` | Embed a collection for semantic search (background job) |
 | POST | `/fetch` | Trigger paper fetching (background job) |
 | GET | `/jobs/{job_id}` | Check background job status |
 
@@ -297,6 +311,12 @@ curl "http://localhost:8000/search?query=machine+learning&k=5"
 
 # Get recommendations
 curl "http://localhost:8000/recommend?k=10"
+
+# Sync your Zotero library
+curl -X POST "http://localhost:8000/sync"
+
+# Embed a collection
+curl -X POST "http://localhost:8000/embed?collection=my+research"
 
 # Start a fetch job
 curl -X POST "http://localhost:8000/fetch?days=3"
@@ -359,7 +379,7 @@ Each provider/model combination uses a separate vector store directory (e.g., `c
 ```bash
 # After changing EMBEDDING_PROVIDER or EMBEDDING_MODEL
 paperfind fetch --rebuild-vectors
-paperfind sync  # to rebuild Zotero vectors
+paperfind embed "your collection" --force  # to rebuild Zotero vectors
 ```
 
 ## Data Storage
@@ -372,16 +392,17 @@ database with two schemas (`daily`, `zotero`). To store embeddings in Postgres, 
 | File/Directory | Created By | Description |
 |----------------|------------|-------------|
 | `daily_papers.db` | `paperfind fetch` | SQLite database (default) of harvested papers from CrossRef, bioRxiv, medRxiv, arXiv |
-| `zotero_meta.db` | `paperfind sync` | SQLite database (default) of your Zotero library (projects, items, tags) |
+| `zotero_meta.db` | `paperfind sync` | SQLite database (default) of your Zotero library (libraries, items, collections, tags) |
 | `chroma_store_<provider>_<model>/` | `paperfind fetch --rebuild-vectors` | ChromaDB vector embeddings for daily papers |
-| `zotero_vectors_<provider>_<model>/` | `paperfind sync` | ChromaDB vector embeddings for Zotero items |
+| `zotero_vectors_<provider>_<model>/` | `paperfind embed` | ChromaDB vector embeddings for Zotero items |
 | `.env` | Manual | Optional: API keys (can also be in current directory) |
 
 ### What Happens on Repeated Runs
 
 | Command | Behavior |
 |---------|----------|
-| `paperfind sync` | **Replaces** all items for the collection. Fetches fresh data from Zotero API and rebuilds vectors. Safe to run multiple times. |
+| `paperfind sync` | **Upserts** all items from your entire Zotero library. Updates existing items, adds new ones, and refreshes collection memberships. Safe to run multiple times. |
+| `paperfind embed <collection>` | **Skips** items already embedded. Only embeds new items in the collection. Use `--force` to re-embed all. |
 | `paperfind fetch` | **Upserts** papers (updates existing records, adds new ones). Running daily accumulates papers over time. |
 | `paperfind fetch --rebuild-vectors` | Fetches papers (upsert), then **recreates** the entire vector store from the database. |
 | `paperfind fetch --vectors-only` | **Recreates** the vector store from existing database without fetching new papers. |
