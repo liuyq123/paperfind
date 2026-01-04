@@ -236,24 +236,13 @@ paperfind digest --skip-fetch
 
 **Required SMTP settings**
 
-Email delivery requires these `.env` entries:
+Email delivery requires SMTP configuration. See [`.env.example`](.env.example) for the required variables (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM`, `EMAIL_TO`).
 
-```
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USER=your_smtp_user
-SMTP_PASSWORD=your_smtp_password
-EMAIL_FROM=paperfind@example.com
-EMAIL_TO=you@example.com,teammate@example.com
-```
-
-`EMAIL_TO` accepts a comma-separated list of recipient addresses (no spaces required).
-
-**Note for Gmail users:** If you have 2-factor authentication enabled, use an [App Password](https://myaccount.google.com/apppasswords) instead of your regular password.
+**Note for Gmail users:** Use an [App Password](https://myaccount.google.com/apppasswords) instead of your regular password if you have 2-factor authentication enabled.
 
 **Scheduled runs with GitHub Actions**
 
-To run the digest on a schedule, see the example workflow in [`.github/workflows/digest.yml`](.github/workflows/digest.yml). Store your SMTP and API credentials as repository secrets (Settings → Secrets and variables → Actions).
+To run the digest on a schedule, see [`.github/workflows/digest.yml`](.github/workflows/digest.yml). Store your credentials as repository secrets (Settings → Secrets and variables → Actions).
 
 ### Semantic Search
 

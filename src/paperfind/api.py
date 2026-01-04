@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
+from paperfind.db import DAILY_SCHEMA, get_conn, placeholder, qualify_table
+
 app = FastAPI(title="Paperfind API", version="0.2.0")
 
 
@@ -289,11 +291,13 @@ def search_papers(
 def list_papers(
     limit: int = Query(default=50, ge=1, le=500, description="Number of papers to return"),
     offset: int = Query(default=0, ge=0, description="Offset for pagination"),
-    source: Optional[str] = Query(default=None, description="Filter by source"),
+    source: Optional[str] = Query(
+        default=None,
+        description="Filter by source (crossref, biorxiv, medrxiv, arxiv). "
+        "For arxiv, matches all categories (arxiv:cs.AI, arxiv:q-bio.NC, etc.)",
+    ),
 ) -> PapersResponse:
     """List fetched papers with pagination."""
-    from paperfind.db import DAILY_SCHEMA, get_conn, placeholder, qualify_table
-
     try:
         conn = get_conn(DAILY_SCHEMA)
     except Exception as e:
@@ -304,26 +308,30 @@ def list_papers(
         table = qualify_table(DAILY_SCHEMA, "works")
         ph = placeholder()
 
-        # Get total count
-        count_sql = f"SELECT COUNT(*) AS total FROM {table}"
-        params: List[Any] = []
+        # Build source filter (use prefix match for sources with sub-categories)
+        source_clause = ""
+        source_params: List[Any] = []
         if source:
-            count_sql += f" WHERE source = {ph}"
-            params.append(source)
+            # arxiv stores as "arxiv:category", use prefix match
+            if source.lower() in ("arxiv", "biorxiv", "medrxiv"):
+                source_clause = f" WHERE source LIKE {ph}"
+                source_params = [f"{source.lower()}%"]
+            else:
+                source_clause = f" WHERE source = {ph}"
+                source_params = [source]
 
-        cursor.execute(count_sql, params)
+        # Get total count
+        count_sql = f"SELECT COUNT(*) AS total FROM {table}{source_clause}"
+        cursor.execute(count_sql, source_params)
         total_row = cursor.fetchone()
         total = total_row["total"] if total_row is not None else 0
 
         # Get papers
         select_sql = (
             f"SELECT doi, title, authors, abstract, source, created_date "
-            f"FROM {table}"
+            f"FROM {table}{source_clause}"
         )
-        params = []  # type: List[Any]
-        if source:
-            select_sql += f" WHERE source = {ph}"
-            params.append(source)
+        params: List[Any] = list(source_params)
 
         select_sql += f" ORDER BY created_date DESC LIMIT {ph} OFFSET {ph}"
         params.extend([limit, offset])

@@ -78,7 +78,10 @@ def _vector_table_name(source: str) -> str:
 
 def _pgvector_connect():
     if not is_postgres():
-        raise ValueError("PAPERFIND_DB_URL is required for pgvector backend.")
+        raise ValueError(
+            "PAPERFIND_DB_URL is required for pgvector backend. "
+            "Example: PAPERFIND_DB_URL=postgresql://user:pass@localhost/paperfind"
+        )
     try:
         import psycopg
         from psycopg.rows import dict_row
@@ -216,7 +219,7 @@ class PGVectorStore(VectorStore):
         embeddings = self.embedding_function.embed_documents(text_list)
 
         records = [
-            (id_value, embedding, text, json.dumps(metadata or {}))
+            (id_value, embedding, text, json.dumps(metadata or {}, default=_json_default))
             for id_value, embedding, text, metadata in zip(id_list, embeddings, text_list, metadata_list)
         ]
 
@@ -513,3 +516,10 @@ def _normalize_metadata(value: Any) -> Dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return dict(value)
+
+
+def _json_default(value: Any) -> str:
+    """JSON serializer for metadata values that aren't natively serializable."""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)

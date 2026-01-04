@@ -1,10 +1,12 @@
 import importlib
+from unittest.mock import MagicMock, patch
+
 import pytest
 from langchain_core.documents import Document
 
 pytest.importorskip("fastapi")
 
-from paperfind.api import recommend, search_papers
+from paperfind.api import list_papers, recommend, search_papers
 import paperfind.search.utils as utils_module
 
 # Import modules directly to avoid name shadowing from __init__.py
@@ -102,3 +104,122 @@ def test_recommend_uses_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.recommendations[0].authors == "A. Author"
     assert response.recommendations[0].created_date == "2024-01-01"
     assert response.recommendations[0].similar_to == "Seed Paper"
+
+
+class TestListPapersSourceFilter:
+    """Tests for /papers endpoint source filtering."""
+
+    @patch("paperfind.api.get_conn")
+    def test_arxiv_source_uses_like_prefix(self, mock_get_conn: MagicMock) -> None:
+        """Filtering by 'arxiv' should use LIKE to match arxiv:* sources."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        # Mock count query
+        mock_cursor.fetchone.side_effect = [
+            {"total": 2},  # count result
+        ]
+        # Mock select query
+        mock_cursor.fetchall.return_value = [
+            {
+                "doi": "arxiv:2401.12345",
+                "title": "Paper 1",
+                "authors": "Author 1",
+                "abstract": "Abstract 1",
+                "source": "arxiv:cs.AI",
+                "created_date": "2024-01-15",
+            },
+            {
+                "doi": "arxiv:2401.67890",
+                "title": "Paper 2",
+                "authors": "Author 2",
+                "abstract": "Abstract 2",
+                "source": "arxiv:q-bio.NC",
+                "created_date": "2024-01-14",
+            },
+        ]
+        mock_get_conn.return_value = mock_conn
+
+        response = list_papers(limit=50, offset=0, source="arxiv")
+
+        # Verify LIKE was used with arxiv% pattern
+        calls = mock_cursor.execute.call_args_list
+        # Count query should use LIKE
+        count_call = calls[0]
+        assert "LIKE" in count_call[0][0]
+        assert count_call[0][1] == ["arxiv%"]
+
+        # Select query should also use LIKE
+        select_call = calls[1]
+        assert "LIKE" in select_call[0][0]
+
+        assert response.count == 2
+        assert response.papers[0].source == "arxiv:cs.AI"
+        assert response.papers[1].source == "arxiv:q-bio.NC"
+
+    @patch("paperfind.api.get_conn")
+    def test_crossref_source_uses_exact_match(self, mock_get_conn: MagicMock) -> None:
+        """Filtering by 'crossref' should use exact match."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_cursor.fetchone.return_value = {"total": 1}
+        mock_cursor.fetchall.return_value = [
+            {
+                "doi": "10.1234/test",
+                "title": "Paper",
+                "authors": "Author",
+                "abstract": "Abstract",
+                "source": "crossref",
+                "created_date": "2024-01-15",
+            },
+        ]
+        mock_get_conn.return_value = mock_conn
+
+        response = list_papers(limit=50, offset=0, source="crossref")
+
+        # Verify exact match was used (= not LIKE)
+        calls = mock_cursor.execute.call_args_list
+        count_call = calls[0]
+        assert "=" in count_call[0][0] and "LIKE" not in count_call[0][0]
+        assert count_call[0][1] == ["crossref"]
+
+        assert response.count == 1
+
+    @patch("paperfind.api.get_conn")
+    def test_biorxiv_source_uses_like_prefix(self, mock_get_conn: MagicMock) -> None:
+        """Filtering by 'biorxiv' should use LIKE for potential sub-categories."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_cursor.fetchone.return_value = {"total": 0}
+        mock_cursor.fetchall.return_value = []
+        mock_get_conn.return_value = mock_conn
+
+        list_papers(limit=50, offset=0, source="biorxiv")
+
+        calls = mock_cursor.execute.call_args_list
+        count_call = calls[0]
+        assert "LIKE" in count_call[0][0]
+        assert count_call[0][1] == ["biorxiv%"]
+
+    @patch("paperfind.api.get_conn")
+    def test_no_source_filter_returns_all(self, mock_get_conn: MagicMock) -> None:
+        """No source filter should return all papers."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_cursor.fetchone.return_value = {"total": 10}
+        mock_cursor.fetchall.return_value = []
+        mock_get_conn.return_value = mock_conn
+
+        list_papers(limit=50, offset=0, source=None)
+
+        calls = mock_cursor.execute.call_args_list
+        count_call = calls[0]
+        # No WHERE clause
+        assert "WHERE" not in count_call[0][0]
