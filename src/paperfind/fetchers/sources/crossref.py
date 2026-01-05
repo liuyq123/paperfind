@@ -1,5 +1,7 @@
 """CrossRef fetcher."""
 
+from __future__ import annotations
+
 import html
 import re
 from datetime import date
@@ -9,6 +11,7 @@ import requests
 
 from paperfind.config import CROSSREF_EMAIL
 from paperfind.logging import get_logger
+from paperfind.retry import retry_request
 from paperfind.types import PaperDict
 
 logger = get_logger(__name__)
@@ -27,7 +30,7 @@ def fetch_crossref(target_date: date, type_filter: Optional[str] = None) -> List
     else:
         user_agent = f"{TOOL_NAME}/{TOOL_VERSION}"
 
-    params = {
+    params: Dict[str, Any] = {
         "filter": f"from-created-date:{target_date},until-created-date:{target_date}",
         "rows": 1000,
         "cursor": "*",
@@ -40,7 +43,10 @@ def fetch_crossref(target_date: date, type_filter: Optional[str] = None) -> List
 
     while True:
         try:
-            resp = requests.get(CROSSREF_API, params=params, headers=headers, timeout=60)
+            resp = retry_request(
+                lambda: requests.get(CROSSREF_API, params=params, headers=headers, timeout=60),
+                description="CrossRef",
+            )
             resp.raise_for_status()
             msg = resp.json()["message"]
         except requests.RequestException as e:

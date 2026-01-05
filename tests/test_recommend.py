@@ -412,3 +412,133 @@ class TestReranking:
         # Should fall back gracefully
         assert rerank_used is False
         assert len(result) == 1
+
+
+class TestExcludeDois:
+    """Tests for exclude_dois parameter."""
+
+    @patch("paperfind.search.recommend.check_vector_store")
+    @patch("paperfind.search.recommend.vector_store_exists")
+    @patch("paperfind.search.recommend.get_zotero_papers")
+    @patch("paperfind.search.recommend.get_zotero_dois")
+    @patch("paperfind.search.recommend.get_vector_store")
+    @patch("paperfind.search.recommend.get_embeddings_from_store")
+    @patch("paperfind.search.recommend.similarity_search_by_vector")
+    def test_excludes_specified_dois(
+        self,
+        mock_search,
+        mock_get_embeddings,
+        mock_get_store,
+        mock_get_dois,
+        mock_get_papers,
+        mock_store_exists,
+        mock_check,
+    ):
+        mock_check.return_value = True
+        mock_store_exists.return_value = True
+        mock_get_papers.return_value = [
+            {"zotero_key": "key1", "title": "Paper 1", "abstract": "Abstract 1"}
+        ]
+        mock_get_dois.return_value = set()
+        mock_get_store.return_value = MagicMock()
+        mock_get_embeddings.return_value = {"key1": [0.1, 0.2, 0.3]}
+
+        # Three docs, one should be excluded
+        doc1 = Document(
+            page_content="First",
+            metadata={"doi": "10.1234/first", "title": "First Paper"},
+        )
+        doc2 = Document(
+            page_content="Second",
+            metadata={"doi": "10.1234/excluded", "title": "Excluded Paper"},
+        )
+        doc3 = Document(
+            page_content="Third",
+            metadata={"doi": "10.1234/third", "title": "Third Paper"},
+        )
+        mock_search.return_value = [(doc1, 0.1), (doc2, 0.2), (doc3, 0.3)]
+
+        result = get_recommendations(
+            k=5, rerank=False, exclude_dois={"10.1234/excluded"}
+        )
+
+        # Should exclude the specified DOI
+        assert len(result) == 2
+        dois = [r[0] for r in result]
+        assert "10.1234/first" in dois
+        assert "10.1234/third" in dois
+        assert "10.1234/excluded" not in dois
+
+    @patch("paperfind.search.recommend.check_vector_store")
+    @patch("paperfind.search.recommend.vector_store_exists")
+    @patch("paperfind.search.recommend.get_zotero_papers")
+    @patch("paperfind.search.recommend.get_zotero_dois")
+    @patch("paperfind.search.recommend.get_vector_store")
+    @patch("paperfind.search.recommend.get_embeddings_from_store")
+    @patch("paperfind.search.recommend.similarity_search_by_vector")
+    def test_empty_exclude_dois_returns_all(
+        self,
+        mock_search,
+        mock_get_embeddings,
+        mock_get_store,
+        mock_get_dois,
+        mock_get_papers,
+        mock_store_exists,
+        mock_check,
+    ):
+        mock_check.return_value = True
+        mock_store_exists.return_value = True
+        mock_get_papers.return_value = [
+            {"zotero_key": "key1", "title": "Paper 1", "abstract": "Abstract 1"}
+        ]
+        mock_get_dois.return_value = set()
+        mock_get_store.return_value = MagicMock()
+        mock_get_embeddings.return_value = {"key1": [0.1, 0.2, 0.3]}
+
+        doc = Document(
+            page_content="Test",
+            metadata={"doi": "10.1234/test", "title": "Test Paper"},
+        )
+        mock_search.return_value = [(doc, 0.5)]
+
+        # Empty exclude set should not filter anything
+        result = get_recommendations(k=5, rerank=False, exclude_dois=set())
+
+        assert len(result) == 1
+
+    @patch("paperfind.search.recommend.check_vector_store")
+    @patch("paperfind.search.recommend.vector_store_exists")
+    @patch("paperfind.search.recommend.get_zotero_papers")
+    @patch("paperfind.search.recommend.get_zotero_dois")
+    @patch("paperfind.search.recommend.get_vector_store")
+    @patch("paperfind.search.recommend.get_embeddings_from_store")
+    @patch("paperfind.search.recommend.similarity_search_by_vector")
+    def test_none_exclude_dois_returns_all(
+        self,
+        mock_search,
+        mock_get_embeddings,
+        mock_get_store,
+        mock_get_dois,
+        mock_get_papers,
+        mock_store_exists,
+        mock_check,
+    ):
+        mock_check.return_value = True
+        mock_store_exists.return_value = True
+        mock_get_papers.return_value = [
+            {"zotero_key": "key1", "title": "Paper 1", "abstract": "Abstract 1"}
+        ]
+        mock_get_dois.return_value = set()
+        mock_get_store.return_value = MagicMock()
+        mock_get_embeddings.return_value = {"key1": [0.1, 0.2, 0.3]}
+
+        doc = Document(
+            page_content="Test",
+            metadata={"doi": "10.1234/test", "title": "Test Paper"},
+        )
+        mock_search.return_value = [(doc, 0.5)]
+
+        # None exclude set should not filter anything
+        result = get_recommendations(k=5, rerank=False, exclude_dois=None)
+
+        assert len(result) == 1

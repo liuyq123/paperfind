@@ -1,11 +1,15 @@
-# Project Structure
+# Developer Guide
+
+This document centralizes developer-facing documentation (architecture, extension points, API, tests).
+User-facing usage remains in the root `README.md`.
+
+## Project Structure
 
 ```
 src/
 └── paperfind/            # Main package
-    ├── __init__.py
-    ├── cli.py            # Command-line interface
     ├── api.py            # FastAPI REST API
+    ├── cli.py            # Command-line interface
     ├── config.py         # Configuration and paths
     ├── db.py             # Database abstraction (SQLite/Postgres)
     ├── documents.py      # Document parsing utilities
@@ -14,6 +18,10 @@ src/
     ├── rerank.py         # Cross-encoder reranking
     ├── types.py          # Shared type definitions
     ├── vectorstore.py    # Vector store backends (Chroma/pgvector)
+    ├── digest/           # Email digest pipeline
+    │   ├── digest.py
+    │   ├── email.py
+    │   └── template.py
     ├── fetchers/         # Paper fetching modules
     │   ├── db.py
     │   ├── fetch_papers.py
@@ -21,22 +29,56 @@ src/
     │   ├── sources/
     │   │   ├── arxiv.py
     │   │   ├── biorxiv.py
+    │   │   ├── chemrxiv.py
     │   │   └── crossref.py
     │   └── zotero/
     │       ├── api.py
     │       ├── db.py
     │       ├── sync.py
     │       └── vector.py
-    ├── digest/           # Email digest pipeline
-    │   ├── digest.py
-    │   ├── email.py
-    │   └── template.py
     └── search/           # Search and recommendation
+        ├── formatting.py
         ├── recommend.py
         ├── search.py
-        ├── formatting.py
         └── utils.py
 ```
+
+## Architecture Overview
+
+Paperfind:
+1. Fetches papers from multiple sources (CrossRef, arXiv, bioRxiv, medRxiv, ChemRxiv)
+2. Stores metadata in SQLite or PostgreSQL
+3. Builds vector embeddings for semantic search
+4. Recommends papers based on similarity to your Zotero library
+
+### Vector Store Abstraction
+
+Backend selection:
+
+```bash
+PAPERFIND_VECTOR_STORE=chroma   # default
+PAPERFIND_VECTOR_STORE=pgvector
+```
+
+Key helpers:
+
+```python
+vectordb = get_vector_store(source="daily_papers")
+exists = vector_store_exists(source="daily_papers")
+embeddings = get_embeddings_from_store(vectordb, ids=["doi1", "doi2"])
+results = similarity_search_by_vector(vectordb, embedding, k=10)
+```
+
+### Embeddings System
+
+Supported providers: `openai`, `ollama`, `huggingface`. Configure via:
+
+```bash
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+Each provider/model pair gets its own vector store directory/table.
 
 ## Database Schemas
 
@@ -58,7 +100,7 @@ src/
 |-------|-------------|
 | `libraries` | Zotero libraries synced (user or group libraries) |
 | `collections` | Zotero collections within each library |
-| `items` | Papers with metadata (zotero_key, title, authors, abstract, DOI, date, URL) - unique per library |
+| `items` | Papers with metadata (zotero_key, title, authors, abstract, DOI, date, URL) |
 | `item_collections` | Many-to-many relationship linking items to collections |
 | `tags` | Research tags for organization |
 
@@ -73,75 +115,60 @@ When `PAPERFIND_DB_URL` is set, data is stored in a single Postgres database wit
 
 ### ChromaDB (default vector store)
 
-When using the default `PAPERFIND_VECTOR_STORE=chroma`, embeddings are stored in local directories:
-
 | Directory | Description |
 |-----------|-------------|
 | `chroma_store_<provider>_<model>/` | Embeddings for fetched papers |
 | `zotero_vectors_<provider>_<model>/` | Embeddings for Zotero items |
 
-ChromaDB stores data in SQLite files within these directories (`chroma.sqlite3`).
-
 ### pgvector (optional vector store)
-
-When `PAPERFIND_VECTOR_STORE=pgvector`, embeddings are stored in Postgres tables:
 
 | Table | Description |
 |-------|-------------|
 | `daily.daily_vectors_<provider>_<model>` | Embeddings for fetched papers |
 | `zotero.zotero_vectors_<provider>_<model>` | Embeddings for Zotero items |
 
-Each vector table has columns: `id`, `embedding`, `document`, `metadata`
-
 ## API Server
 
-Paperfind includes a REST API for programmatic access.
-
-### Setup
+Install and run:
 
 ```bash
 pip install paperfind[api]
 uvicorn paperfind.api:app --reload
 ```
 
-Interactive API docs available at `http://localhost:8000/docs`.
+Interactive docs at `http://localhost:8000/docs`.
 
-### Endpoints
+Endpoints:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
 | GET | `/collections` | List Zotero collections |
-| GET | `/search?query=...` | Semantic search (supports `scores`, `rag`, `source` params) |
+| GET | `/search?query=...` | Semantic search (supports `scores`, `rag`, `source`) |
 | GET | `/papers` | List fetched papers (paginated) |
 | GET | `/recommend` | Get paper recommendations |
 | POST | `/sync` | Trigger Zotero library sync (background job) |
-| POST | `/embed` | Embed Zotero items for semantic search (optional: `collection`) |
+| POST | `/embed` | Embed Zotero items (optional: `collection`) |
 | POST | `/fetch` | Trigger paper fetching (background job) |
 | GET | `/jobs/{job_id}` | Check background job status |
 
-### Examples
+## Development
 
-```bash
-# Search papers
-curl "http://localhost:8000/search?query=machine+learning&k=5"
+### Adding a New Paper Source
 
-# Get recommendations
-curl "http://localhost:8000/recommend?k=10"
+1. Implement a fetcher in `src/paperfind/fetchers/sources/` that returns a list of `PaperDict`.
+2. Add the source to `fetch_all()` in `src/paperfind/fetchers/fetch_papers.py`.
+3. Add the source name to CLI `--source` choices in `src/paperfind/cli.py`.
+4. Update README docs and add tests.
 
-# Sync your Zotero library
-curl -X POST "http://localhost:8000/sync"
+Required `PaperDict` fields:
 
-# Embed all items
-curl -X POST "http://localhost:8000/embed"
-
-# Embed a specific collection
-curl -X POST "http://localhost:8000/embed?collection=my+research"
-
-# Start a fetch job
-curl -X POST "http://localhost:8000/fetch?days=3"
-# Returns: {"job_id": "abc-123", "status": "pending", "job_type": "fetch"}
-
-# Check job status
-curl "http://localhost:8000/jobs/abc-123"
-```
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `doi` | str | Yes | Unique identifier (DOI or similar) |
+| `title` | str | Yes | Paper title |
+| `authors` | str | No | Comma-separated author names |
+| `abstract` | str | Yes | Paper abstract (used for embeddings) |
+| `created_date` | str | No | Publication date (YYYY-MM-DD) |
+| `type` | str | No | Paper type (preprint, journal-article) |
+| `source` | str | Yes | Source identifier for filtering |

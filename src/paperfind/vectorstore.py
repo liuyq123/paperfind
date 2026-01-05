@@ -470,8 +470,15 @@ def get_embeddings_from_store(
     if hasattr(vectordb, "_collection"):
         try:
             result = vectordb._collection.get(ids=ids, include=["embeddings"])
-            if result and result.get("ids") and result.get("embeddings"):
-                return dict(zip(result["ids"], result["embeddings"]))
+            if not result:
+                return {}
+            result_ids = result.get("ids")
+            result_embeddings = result.get("embeddings")
+            if result_ids is None or result_embeddings is None:
+                return {}
+            if len(result_ids) == 0 or len(result_embeddings) == 0:
+                return {}
+            return dict(zip(result_ids, result_embeddings))
         except Exception as exc:
             logger.warning(f"Failed to get embeddings from Chroma: {exc}")
 

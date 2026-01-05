@@ -7,6 +7,7 @@ import requests
 
 from paperfind.config import BIORXIV_CATEGORIES
 from paperfind.logging import get_logger
+from paperfind.retry import retry_request
 from paperfind.types import PaperDict
 
 logger = get_logger(__name__)
@@ -39,7 +40,10 @@ def fetch_biorxiv(
         url = f"{BIORXIV_API}/{server}/{interval}/{cursor}/json"
 
         try:
-            resp = requests.get(url, timeout=60)
+            resp = retry_request(
+                lambda url=url: requests.get(url, timeout=60),
+                description=server,
+            )
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as e:

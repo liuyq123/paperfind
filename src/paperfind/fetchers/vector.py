@@ -1,4 +1,7 @@
 """Vector store helpers for paper fetchers."""
+
+from __future__ import annotations
+
 import time
 from pathlib import Path
 from typing import Any, List, Mapping, Sequence
@@ -138,19 +141,14 @@ def rebuild_vectors() -> None:
             logger.debug(f"Cleared existing store at {chroma_dir}/")
 
     table = qualify_table(DAILY_SCHEMA, "works")
-    cur.execute(
-        f"SELECT doi, title, authors, abstract, created_date, type, source FROM {table}"
-    )
-
-    docs = _build_documents(cur.fetchall())
-
-    conn.close()
-
-    if not docs:
+    cur.execute(f"SELECT COUNT(*) AS cnt FROM {table}")
+    total = cur.fetchone()["cnt"]
+    if not total:
+        conn.close()
         logger.warning("No documents to embed")
         return
 
-    logger.info(f"    Embedding {len(docs)} documents...")
+    logger.info(f"    Embedding {total} documents...")
 
     batch_size = DEFAULT_BATCH_SIZE
     try:
@@ -161,11 +159,22 @@ def rebuild_vectors() -> None:
     if backend == "pgvector":
         vectordb.delete()
 
-    for i in range(0, len(docs), batch_size):
-        batch = docs[i : i + batch_size]
-        logger.debug(
-            f"    Batch {i // batch_size + 1}/{(len(docs) - 1) // batch_size + 1} ({len(batch)} docs)"
-        )
+    cur.execute(
+        f"SELECT doi, title, authors, abstract, created_date, type, source FROM {table}"
+    )
+    batch_index = 0
+    while True:
+        rows = cur.fetchmany(batch_size)
+        if not rows:
+            break
+
+        batch = _build_documents(rows)
+        if not batch:
+            logger.warning("No documents to embed")
+            break
+
+        batch_index += 1
+        logger.debug(f"    Batch {batch_index} ({len(batch)} docs)")
 
         max_retries = 5
         for attempt in range(max_retries):
@@ -179,11 +188,56 @@ def rebuild_vectors() -> None:
                     logger.warning(f"Rate limited. Waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
                 else:
+                    conn.close()
                     raise
         else:
             logger.error(f"Failed after {max_retries} retries, skipping batch")
+
+    conn.close()
 
     if backend == "chroma":
         logger.info(f"    Done! Vector store saved to {chroma_dir}/")
     else:
         logger.info("    Done! Vector store saved to Postgres (pgvector)")
+
+
+def prune_vectors(dois: List[str], batch_size: int = DEFAULT_BATCH_SIZE) -> int:
+    """Delete vector embeddings for specific DOIs.
+
+    Args:
+        dois: List of DOIs to delete from the vector store.
+        batch_size: Number of IDs to delete per batch.
+
+    Returns:
+        Number of embeddings deleted.
+    """
+    if not dois:
+        return 0
+
+    try:
+        vectordb = get_vector_store()
+    except (ImportError, ValueError) as exc:
+        logger.error(str(exc))
+        return 0
+
+    # Get existing IDs to only delete those that exist
+    existing_ids = get_existing_ids(vectordb)
+    dois_to_delete = [doi for doi in dois if doi in existing_ids]
+
+    if not dois_to_delete:
+        logger.info("No vector embeddings to delete")
+        return 0
+
+    # Delete in batches
+    total_deleted = 0
+    for i in range(0, len(dois_to_delete), batch_size):
+        batch = dois_to_delete[i : i + batch_size]
+        try:
+            vectordb.delete(ids=batch)
+            total_deleted += len(batch)
+        except Exception as exc:
+            logger.error(f"Error deleting vector batch: {exc}")
+            continue
+
+    logger.info(f"Deleted {total_deleted} embeddings from vector store")
+    return total_deleted

@@ -1,9 +1,12 @@
 """Database functions for Zotero sync."""
 
+from __future__ import annotations
+
 from typing import Any, Dict, List, Optional
 
 from paperfind.db import (
     ZOTERO_SCHEMA,
+    DBConnection,
     get_conn as get_db_conn,
     is_postgres,
     placeholder,
@@ -15,7 +18,7 @@ from paperfind.db import (
 ZoteroItem = Dict[str, Any]
 
 
-def get_conn():
+def get_conn() -> DBConnection:
     """Get database connection."""
     return get_db_conn(ZOTERO_SCHEMA)
 

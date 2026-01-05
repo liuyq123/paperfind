@@ -1,16 +1,14 @@
 """HTML email template for digest."""
 
+from __future__ import annotations
+
 from datetime import date
 from html import escape
-from typing import Any, List, Tuple
+from typing import List
 from urllib.parse import urlparse
 
-from langchain_core.documents import Document
-
 from paperfind.documents import extract_title_and_abstract
-
-# Type alias for recommendation tuple: (doi, (score, doc, zotero_title))
-Recommendation = Tuple[str, Tuple[float, Document, str]]
+from paperfind.types import Recommendation
 
 
 def _get_doi_link(doi: str) -> str:

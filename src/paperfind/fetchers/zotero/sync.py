@@ -8,6 +8,8 @@ Usage:
     paperfind embed "my collection"          # Embed items in a collection
 """
 
+from __future__ import annotations
+
 from typing import Optional
 
 from paperfind.config import (

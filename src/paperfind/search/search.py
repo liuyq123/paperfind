@@ -10,13 +10,17 @@ Usage:
     paperfind search "your query" -k 10
 """
 
+from __future__ import annotations
+
 from typing import List, Optional, Set, Tuple
 
 from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_core.vectorstores.base import VectorStore
 from langchain_openai import ChatOpenAI
+
 from paperfind.config import LLM_MODEL
 from paperfind.db import ZOTERO_SCHEMA, get_conn, placeholder, qualify_table
 from paperfind.logging import get_logger
@@ -62,7 +66,7 @@ def get_collection_zotero_keys(collection_name: str) -> Set[str]:
     conn.close()
     return keys
 
-def get_vectordb(source: str = "daily_papers"):
+def get_vectordb(source: str = "daily_papers") -> VectorStore:
     """Get the appropriate vector database based on source."""
     return get_vector_store(source)
 

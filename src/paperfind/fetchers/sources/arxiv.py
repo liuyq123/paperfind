@@ -10,6 +10,7 @@ import requests
 
 from paperfind.config import ARXIV_CATEGORIES
 from paperfind.logging import get_logger
+from paperfind.retry import retry_request
 from paperfind.types import PaperDict
 
 logger = get_logger(__name__)
@@ -45,7 +46,10 @@ def fetch_arxiv(category: str, days: int = 7) -> List[PaperDict]:
         url = f"{ARXIV_API}?{urlencode(params)}"
 
         try:
-            resp = requests.get(url, timeout=60)
+            resp = retry_request(
+                lambda url=url: requests.get(url, timeout=60),
+                description=f"arXiv {category}",
+            )
             resp.raise_for_status()
             root = ET.fromstring(resp.content)
         except (requests.RequestException, ET.ParseError) as e:

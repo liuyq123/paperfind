@@ -21,10 +21,12 @@ A paper recommendation system that discovers relevant papers and preprints based
   - [Fetch Papers](#fetch-papers)
   - [Email Digest](#email-digest)
   - [Semantic Search](#semantic-search)
+  - [Prune Old Papers](#prune-old-papers)
   - [Embedding Providers](#embedding-providers)
   - [API Server (optional)](#api-server-optional)
 - [Data Storage](#data-storage)
   - [What Happens on Repeated Runs](#what-happens-on-repeated-runs)
+- [Developer Docs](#developer-docs)
 - [License](#license)
 
 ## Features
@@ -198,7 +200,8 @@ paperfind fetch --vectors-only
 
 **Sources and categories:**
 - **CrossRef**: Journal articles and preprints with DOIs
-- **bioRxiv/medRxiv**: Life science preprints. Categories configured via `BIORXIV_CATEGORIES` env var.
+- **bioRxiv**: Life science preprints. Categories configured via `BIORXIV_CATEGORIES` env var.
+- **medRxiv**: Clinical preprints. Categories configured via `MEDRXIV_CATEGORIES` env var.
 - **arXiv**: Preprints. Categories configured via `ARXIV_CATEGORIES` env var.
 - **ChemRxiv**: Chemistry preprints.
 
@@ -236,6 +239,10 @@ Email delivery requires SMTP configuration. See [`.env.example`](.env.example) f
 
 **Note for Gmail users:** Use an [App Password](https://myaccount.google.com/apppasswords) instead of your regular password if you have 2-factor authentication enabled.
 
+**Avoiding repeat recommendations**
+
+The digest automatically tracks which papers have been sent and excludes them from future recommendations. Sent papers are recorded after each successful email and expire after 30 days, allowing them to resurface if still relevant.
+
 **Scheduled runs with GitHub Actions**
 
 To run the digest on a schedule, see [`.github/workflows/digest.yml`](.github/workflows/digest.yml). Store your credentials as repository secrets (Settings → Secrets and variables → Actions).
@@ -260,6 +267,28 @@ paperfind search "active learning" -s zotero
 # Ask a question using RAG (Retrieval-Augmented Generation)
 paperfind search "What methods are used for ultra-large library screening?" --rag
 ```
+
+### Prune Old Papers
+
+Over time, the database and vector store grow as you fetch papers daily. Use the prune command to delete old papers and keep storage manageable:
+
+```bash
+# Preview what would be deleted (dry run)
+paperfind prune --older-than 30 --dry-run
+
+# Delete papers older than 30 days from database and vector store
+paperfind prune --older-than 30
+
+# See individual DOIs in dry run (with verbose flag)
+paperfind prune --older-than 30 --dry-run -v
+```
+
+The prune command:
+- Deletes papers from the database where `created_date` is older than the specified number of days
+- Removes corresponding embeddings from the vector store
+- Does not affect your Zotero library (only daily papers)
+
+**Automated pruning:** The GitHub Actions workflow ([`.github/workflows/digest.yml`](.github/workflows/digest.yml)) automatically prunes papers older than 30 days after each digest run.
 
 ### Embedding Providers
 
@@ -341,8 +370,15 @@ database with two schemas (`daily`, `zotero`). To store embeddings in Postgres, 
 | `paperfind fetch` | **Upserts** papers (updates existing records, adds new ones). Running daily accumulates papers over time. |
 | `paperfind fetch --rebuild-vectors` | Fetches papers (upsert), then **recreates** the entire vector store from the database. |
 | `paperfind fetch --vectors-only` | **Recreates** the vector store from existing database without fetching new papers. |
+| `paperfind digest` | **Tracks** sent recommendations to avoid repeats. Records expire after 30 days. |
+| `paperfind prune --older-than N` | **Deletes** papers older than N days from both the database and vector store. Use `--dry-run` to preview. |
 
 For database schema details, see [src/README.md](src/README.md#database-schemas).
+
+## Developer Docs
+
+Developer guide and architecture notes live in [src/README.md](src/README.md).  
+Test setup and commands live in [tests/README.md](tests/README.md).
 
 ## License
 

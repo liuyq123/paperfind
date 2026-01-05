@@ -9,12 +9,15 @@ Usage:
     paperfind digest --days 7 -k 20     # Custom settings
 """
 
-from datetime import date
+from __future__ import annotations
+
+from datetime import date, timedelta
 from typing import Optional
 
 from paperfind.config import EMAIL_FROM, EMAIL_TO, SMTP_PASSWORD, SMTP_USER
 from paperfind.digest.email import send_email
 from paperfind.digest.template import render_digest
+from paperfind.fetchers.db import get_sent_dois, prune_sent_recommendations, record_sent_dois
 from paperfind.fetchers.fetch_papers import fetch_all
 from paperfind.fetchers.vector import upsert_vectors_for_dois
 from paperfind.logging import get_logger
@@ -67,16 +70,23 @@ def run_digest(
     else:
         logger.info("Skipping fetch, using existing papers...")
 
-    # Step 3: Generate recommendations
+    # Step 3: Generate recommendations (excluding previously sent)
     logger.info("=" * 50)
     logger.info("Step 3: Generating recommendations")
     logger.info("=" * 50)
+
+    # Get previously sent DOIs to avoid repeats
+    sent_dois = get_sent_dois()
+    if sent_dois:
+        logger.info(f"    Excluding {len(sent_dois)} previously sent recommendations")
+
     recommendations, rerank_used = get_recommendations(
         k=num_recommendations,
         collection=collection,
         rerank=rerank,
         return_rerank_used=True,
         max_age_days=max_age_days,
+        exclude_dois=sent_dois,
     )
 
     if not recommendations:
@@ -117,5 +127,14 @@ def run_digest(
         except ValueError as exc:
             logger.error(f"Email sending failed: {exc}")
             return
+
+        # Record sent DOIs to avoid repeats in future digests
+        sent_paper_dois = [doi for doi, _ in recommendations]
+        record_sent_dois(sent_paper_dois)
+        logger.info(f"    Recorded {len(sent_paper_dois)} recommendations as sent")
+
+        # Prune old sent records (allow papers to resurface after 30 days)
+        prune_cutoff = date.today() - timedelta(days=30)
+        prune_sent_recommendations(prune_cutoff)
 
     logger.info("Digest complete!")

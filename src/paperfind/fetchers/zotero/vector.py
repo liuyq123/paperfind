@@ -1,8 +1,12 @@
 """Vector database functions for Zotero sync."""
 
+from __future__ import annotations
+
 from typing import Any, Dict, List, Set
 
 from langchain_core.documents import Document
+
+from langchain_core.vectorstores.base import VectorStore
 
 from paperfind.logging import get_logger
 from paperfind.vectorstore import get_vector_store, get_vector_store_backend
@@ -10,7 +14,7 @@ from paperfind.vectorstore import get_vector_store, get_vector_store_backend
 logger = get_logger(__name__)
 
 
-def get_vectordb():
+def get_vectordb() -> VectorStore:
     """Get or create vector store."""
     return get_vector_store("zotero")
 

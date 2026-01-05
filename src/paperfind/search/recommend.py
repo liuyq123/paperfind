@@ -13,7 +13,7 @@ Usage:
 
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import List, Optional, Set, Tuple
 
 from langchain_core.documents import Document
 
@@ -30,6 +30,13 @@ from paperfind.logging import get_logger
 from paperfind.rerank import get_rerank_model, rerank_pairs
 from paperfind.search.formatting import format_document, format_markdown_recommendation
 from paperfind.search.utils import check_vector_store
+from paperfind.types import (
+    Recommendation,
+    RecommendationList,
+    RecommendationResult,
+    RecommendationWithQuery,
+    ZoteroPaper,
+)
 from paperfind.vectorstore import (
     get_embeddings_from_store,
     get_vector_store,
@@ -38,15 +45,6 @@ from paperfind.vectorstore import (
 )
 
 logger = get_logger(__name__)
-
-# Type aliases for recommendations
-Recommendation = Tuple[str, Tuple[float, Document, str]]
-RecommendationWithQuery = Tuple[str, Tuple[float, Document, str, str]]
-RecommendationList = List[Recommendation]
-RecommendationResult = Union[RecommendationList, Tuple[RecommendationList, bool]]
-
-# Type alias for Zotero paper dict
-ZoteroPaper = Dict[str, Any]
 
 
 def _check_zotero_db() -> bool:
@@ -217,6 +215,7 @@ def get_recommendations(
     rerank_candidates: int = 50,
     return_rerank_used: bool = False,
     max_age_days: Optional[int] = None,
+    exclude_dois: Optional[Set[str]] = None,
 ) -> RecommendationResult:
     """
     Get paper recommendations based on Zotero library.
@@ -231,6 +230,7 @@ def get_recommendations(
         rerank_candidates: Number of candidates to consider for reranking
         return_rerank_used: If True, returns (recommendations, rerank_used)
         max_age_days: Only recommend papers published within this many days
+        exclude_dois: Set of DOIs to exclude from recommendations (e.g., previously sent)
     """
     def _return_empty() -> RecommendationResult:
         empty: RecommendationList = []
@@ -313,6 +313,10 @@ def get_recommendations(
 
             # Skip if already in Zotero
             if doi.lower() in existing_dois:
+                continue
+
+            # Skip if in exclude list (e.g., previously sent)
+            if exclude_dois and doi in exclude_dois:
                 continue
 
             # Skip if paper is older than cutoff date

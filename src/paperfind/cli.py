@@ -9,7 +9,10 @@ Usage:
     paperfind recommend                # Get paper recommendations
     paperfind search "query"           # Semantic search
     paperfind digest                   # Send email digest of recommendations
+    paperfind prune --older-than 30    # Delete papers older than 30 days
 """
+
+from __future__ import annotations
 
 import argparse
 import sys
@@ -148,6 +151,23 @@ def main() -> None:
     # Config command
     config_parser = subparsers.add_parser("config", help="Show configuration info")
     config_parser.add_argument("--data-dir", action="store_true", help="Show data directory path")
+    config_parser.add_argument(
+        "--check", action="store_true", help="Validate configuration for all operations"
+    )
+
+    # Prune command
+    prune_parser = subparsers.add_parser("prune", help="Delete old papers from database and vector store")
+    prune_parser.add_argument(
+        "--older-than",
+        type=positive_int,
+        required=True,
+        help="Delete papers older than this many days",
+    )
+    prune_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted without actually deleting",
+    )
 
     # Digest command
     digest_parser = subparsers.add_parser("digest", help="Send email digest of recommendations")
@@ -248,16 +268,38 @@ def main() -> None:
         )
 
     elif args.command == "config":
-        from paperfind.config import DATA_DIR
+        from paperfind.config import DATA_DIR, get_config_status
         from paperfind.logging import get_logger
 
         logger = get_logger(__name__)
         if args.data_dir:
             print(DATA_DIR)
+        elif args.check:
+            status = get_config_status()
+            logger.info(f"Data directory: {status['data_dir']}")
+            logger.info(f"Env file loaded: {'Yes' if status['env_file_loaded'] else 'No'}")
+            logger.info(f"Embedding provider: {status['embedding_provider']}")
+            logger.info(f"Embedding model: {status['embedding_model']}")
+            logger.info("")
+            logger.info("Configuration status:")
+            all_valid = True
+            for op, missing in status["operations"].items():
+                if missing:
+                    logger.warning(f"  {op}: Missing {', '.join(missing)}")
+                    all_valid = False
+                else:
+                    logger.info(f"  {op}: OK")
+            if all_valid:
+                logger.info("")
+                logger.info("All configurations valid!")
+            else:
+                logger.info("")
+                logger.info("See .env.example for required variables.")
         else:
             logger.info(f"Data directory: {DATA_DIR}")
             logger.info("To use a different location, set PAPERFIND_DATA_DIR environment variable.")
             logger.info("Place your .env file in the data directory or current working directory.")
+            logger.info("Use --check to validate configuration.")
 
     elif args.command == "digest":
         from paperfind.digest import run_digest
@@ -272,6 +314,31 @@ def main() -> None:
             rerank=not args.no_rerank,
             max_age_days=args.max_age,
         )
+
+    elif args.command == "prune":
+        from datetime import date, timedelta
+
+        from paperfind.fetchers.db import get_old_dois, prune_papers
+        from paperfind.fetchers.vector import prune_vectors
+        from paperfind.logging import get_logger
+
+        logger = get_logger(__name__)
+        cutoff_date = date.today() - timedelta(days=args.older_than)
+
+        if args.dry_run:
+            dois = get_old_dois(cutoff_date)
+            logger.info(f"[Dry run] Would delete {len(dois)} papers older than {cutoff_date}")
+            if dois and args.verbose:
+                for doi in dois[:10]:
+                    logger.info(f"  - {doi}")
+                if len(dois) > 10:
+                    logger.info(f"  ... and {len(dois) - 10} more")
+        else:
+            logger.info(f"[Prune] Deleting papers older than {cutoff_date}...")
+            deleted_count, deleted_dois = prune_papers(cutoff_date)
+            if deleted_dois:
+                prune_vectors(deleted_dois)
+            logger.info(f"[Prune] Done! Deleted {deleted_count} papers.")
 
 
 if __name__ == "__main__":

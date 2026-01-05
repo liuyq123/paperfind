@@ -1,5 +1,7 @@
 """SMTP email sending for digest."""
 
+from __future__ import annotations
+
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText

@@ -14,16 +14,51 @@ import time
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 
-from paperfind.config import DAILY_PAPERS_DB
+from paperfind.config import BIORXIV_CATEGORIES, DAILY_PAPERS_DB, MEDRXIV_CATEGORIES
 from paperfind.fetchers.db import init_db, upsert_work
 from paperfind.fetchers.sources.arxiv import ARXIV_CATEGORIES, fetch_arxiv
-from paperfind.fetchers.sources.biorxiv import BIORXIV_CATEGORIES, fetch_biorxiv
+from paperfind.fetchers.sources.biorxiv import fetch_biorxiv
 from paperfind.fetchers.sources.chemrxiv import fetch_chemrxiv
 from paperfind.fetchers.sources.crossref import fetch_crossref
 from paperfind.fetchers.vector import rebuild_vectors, upsert_vectors_for_dois
 from paperfind.logging import get_logger
+from paperfind.types import PaperDict
 
 logger = get_logger(__name__)
+
+
+# ============ Helpers ============
+
+
+def _fetch_rxiv_papers(
+    start_date: date,
+    end_date: date,
+    server: str,
+    categories: List[str],
+) -> List[PaperDict]:
+    """Fetch papers from bioRxiv or medRxiv.
+
+    Args:
+        start_date: Start of date range
+        end_date: End of date range
+        server: "biorxiv" or "medrxiv"
+        categories: List of categories to fetch, or empty for all
+
+    Returns:
+        List of paper dictionaries
+    """
+    papers: List[PaperDict] = []
+
+    if categories:
+        for category in categories:
+            fetched = fetch_biorxiv(start_date, end_date, server, category=category)
+            papers.extend(fetched)
+            logger.debug(f"    {category}: {len(fetched)} papers")
+    else:
+        logger.debug("    (all categories)")
+        papers = fetch_biorxiv(start_date, end_date, server)
+
+    return papers
 
 
 # ============ Main ============
@@ -83,17 +118,7 @@ def fetch_all(
     # bioRxiv
     if "biorxiv" in sources:
         logger.info("[bioRxiv] Fetching preprints...")
-        biorxiv_papers = []
-        if BIORXIV_CATEGORIES:
-            # Fetch specific categories
-            for category in BIORXIV_CATEGORIES:
-                papers = fetch_biorxiv(start_date, end_date, "biorxiv", category=category)
-                biorxiv_papers.extend(papers)
-                logger.debug(f"    {category}: {len(papers)} papers")
-        else:
-            # No category filter - fetch all
-            logger.debug("    (all categories)")
-            biorxiv_papers = fetch_biorxiv(start_date, end_date, "biorxiv")
+        biorxiv_papers = _fetch_rxiv_papers(start_date, end_date, "biorxiv", BIORXIV_CATEGORIES)
 
         for paper in biorxiv_papers:
             upsert_work(conn, paper)
@@ -106,17 +131,7 @@ def fetch_all(
     # medRxiv
     if "medrxiv" in sources:
         logger.info("[medRxiv] Fetching preprints...")
-        medrxiv_papers = []
-        if BIORXIV_CATEGORIES:
-            # Fetch specific categories
-            for category in BIORXIV_CATEGORIES:
-                papers = fetch_biorxiv(start_date, end_date, "medrxiv", category=category)
-                medrxiv_papers.extend(papers)
-                logger.debug(f"    {category}: {len(papers)} papers")
-        else:
-            # No category filter - fetch all
-            logger.debug("    (all categories)")
-            medrxiv_papers = fetch_biorxiv(start_date, end_date, "medrxiv")
+        medrxiv_papers = _fetch_rxiv_papers(start_date, end_date, "medrxiv", MEDRXIV_CATEGORIES)
 
         for paper in medrxiv_papers:
             upsert_work(conn, paper)

@@ -1,5 +1,7 @@
 """Zotero API functions."""
 
+from __future__ import annotations
+
 from typing import Any, Dict, List, Optional
 
 import requests

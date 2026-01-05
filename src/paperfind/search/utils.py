@@ -1,5 +1,7 @@
 """Shared utilities for search-related modules."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from paperfind.db import is_postgres

@@ -137,6 +137,7 @@ _DEFAULT_BIORXIV_CATEGORIES = [
     "genomics",
     "biophysics",
 ]
+_DEFAULT_MEDRXIV_CATEGORIES: list[str] = []
 
 
 def _parse_categories(
@@ -167,6 +168,10 @@ ARXIV_CATEGORIES = _parse_categories(
 BIORXIV_CATEGORIES = _parse_categories(
     "BIORXIV_CATEGORIES", _DEFAULT_BIORXIV_CATEGORIES, empty_fallback=[]
 )
+# medRxiv: empty/default = fetch all (no category filtering)
+MEDRXIV_CATEGORIES = _parse_categories(
+    "MEDRXIV_CATEGORIES", _DEFAULT_MEDRXIV_CATEGORIES, empty_fallback=[]
+)
 
 # Email settings for digest
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -175,3 +180,109 @@ SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_TO = os.getenv("EMAIL_TO")
+
+
+# Configuration validation
+class ConfigValidationError(Exception):
+    """Raised when required configuration is missing."""
+
+    def __init__(self, missing: list[str], context: str = ""):
+        self.missing = missing
+        self.context = context
+        msg = f"Missing required configuration: {', '.join(missing)}"
+        if context:
+            msg = f"{context}: {msg}"
+        super().__init__(msg)
+
+
+def validate_config(
+    operation: str = "general",
+    raise_on_error: bool = True,
+) -> list[str]:
+    """Validate configuration for a specific operation.
+
+    Args:
+        operation: The operation to validate for. Options:
+            - "zotero": Requires ZOTERO_API_KEY and ZOTERO_USER_ID
+            - "embeddings": Requires OPENAI_API_KEY (for OpenAI provider)
+            - "email": Requires SMTP_USER, SMTP_PASSWORD, EMAIL_FROM, EMAIL_TO
+            - "general": Basic validation (no specific requirements)
+        raise_on_error: If True, raise ConfigValidationError on missing config
+
+    Returns:
+        List of missing configuration variable names (empty if valid)
+
+    Raises:
+        ConfigValidationError: If raise_on_error is True and config is invalid
+    """
+    from paperfind.embeddings import get_embedding_provider
+
+    missing: list[str] = []
+
+    if operation == "zotero":
+        if not ZOTERO_API_KEY:
+            missing.append("ZOTERO_API_KEY")
+        if not ZOTERO_USER_ID:
+            missing.append("ZOTERO_USER_ID")
+
+    elif operation == "embeddings":
+        provider = get_embedding_provider()
+        if provider == "openai" and not OPENAI_API_KEY:
+            missing.append("OPENAI_API_KEY")
+        # Note: ollama and huggingface don't require API keys
+
+    elif operation == "email":
+        if not SMTP_USER:
+            missing.append("SMTP_USER")
+        if not SMTP_PASSWORD:
+            missing.append("SMTP_PASSWORD")
+        if not EMAIL_FROM:
+            missing.append("EMAIL_FROM")
+        if not EMAIL_TO:
+            missing.append("EMAIL_TO")
+
+    if missing and raise_on_error:
+        raise ConfigValidationError(missing, operation)
+
+    return missing
+
+
+def check_config(operation: str = "general") -> bool:
+    """Check if configuration is valid for an operation.
+
+    Returns True if valid, False if missing required configuration.
+    This is a convenience wrapper around validate_config that doesn't raise.
+    """
+    return len(validate_config(operation, raise_on_error=False)) == 0
+
+
+def get_config_status() -> dict:
+    """Get the current configuration status.
+
+    Returns a dict with:
+        - data_dir: Path to data directory
+        - env_file_loaded: Whether .env was found
+        - operations: Dict of operation -> list of missing vars
+    """
+    from paperfind.embeddings import get_embedding_model, get_embedding_provider
+
+    # Check if .env file exists
+    env_file_loaded = False
+    if Path(".env").exists():
+        env_file_loaded = True
+    elif (DATA_DIR / ".env").exists():
+        env_file_loaded = True
+
+    operations = {
+        "zotero": validate_config("zotero", raise_on_error=False),
+        "embeddings": validate_config("embeddings", raise_on_error=False),
+        "email": validate_config("email", raise_on_error=False),
+    }
+
+    return {
+        "data_dir": str(DATA_DIR),
+        "env_file_loaded": env_file_loaded,
+        "embedding_provider": get_embedding_provider(),
+        "embedding_model": get_embedding_model(),
+        "operations": operations,
+    }

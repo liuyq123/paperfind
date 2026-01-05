@@ -1,11 +1,12 @@
 """ChemRxiv fetcher."""
 
 from datetime import date
-from typing import List
+from typing import Any, Dict, List
 
 import requests
 
 from paperfind.logging import get_logger
+from paperfind.retry import retry_request
 from paperfind.types import PaperDict
 
 logger = get_logger(__name__)
@@ -28,10 +29,13 @@ def fetch_chemrxiv(start_date: date, end_date: date) -> List[PaperDict]:
     skip = 0
 
     while True:
-        params = {"limit": PAGE_SIZE, "skip": skip}
+        params: Dict[str, Any] = {"limit": PAGE_SIZE, "skip": skip}
 
         try:
-            resp = requests.get(CHEMRXIV_API, params=params, timeout=60)
+            resp = retry_request(
+                lambda: requests.get(CHEMRXIV_API, params=params, timeout=60),
+                description="ChemRxiv",
+            )
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as e:

@@ -1,5 +1,7 @@
 """Shared formatting utilities for search results and recommendations."""
 
+from __future__ import annotations
+
 from typing import Optional
 
 from langchain_core.documents import Document
