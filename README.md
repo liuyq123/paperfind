@@ -25,7 +25,6 @@ A paper recommendation system that discovers relevant papers and preprints based
   - [Embedding Providers](#embedding-providers)
   - [API Server (optional)](#api-server-optional)
 - [Data Storage](#data-storage)
-  - [What Happens on Repeated Runs](#what-happens-on-repeated-runs)
 - [Developer Docs](#developer-docs)
 - [License](#license)
 
@@ -168,14 +167,14 @@ paperfind recommend --collection "active learning"
 # Save recommendations to markdown file
 paperfind recommend -o recommendations.md
 
-# Reranking is enabled by default; tune candidate pool or disable if needed
-paperfind recommend --rerank-candidates 50
-paperfind recommend --no-rerank
+# Enable cross-encoder reranking for higher quality results
+paperfind recommend --rerank
+paperfind recommend --rerank --rerank-candidates 50
 ```
 
 The markdown file includes title, authors, abstract, date, source, and DOI links for each paper.
-Reranking uses the cross-encoder model in `RERANK_MODEL` (default: `mixedbread-ai/mxbai-rerank-base-v1`).
-Rerank scores are raw cross-encoder scores where higher is better.
+Reranking (disabled by default) uses the cross-encoder model in `RERANK_MODEL` (default: `mixedbread-ai/mxbai-rerank-base-v1`).
+When enabled with `--rerank`, scores are raw cross-encoder scores where higher is better.
 
 ### Fetch Papers
 
@@ -353,25 +352,13 @@ install `paperfind[postgres]` and set `PAPERFIND_DB_URL` in your `.env`. Postgre
 database with two schemas (`daily`, `zotero`). To store embeddings in Postgres, set
 `PAPERFIND_VECTOR_STORE=pgvector` (otherwise Chroma remains the default).
 
-| File/Directory | Created By | Description |
-|----------------|------------|-------------|
-| `daily_papers.db` | `paperfind fetch` | SQLite database (default) of harvested papers from CrossRef, bioRxiv, medRxiv, arXiv, ChemRxiv |
-| `zotero_meta.db` | `paperfind sync` | SQLite database (default) of your Zotero library (libraries, items, collections, tags) |
-| `chroma_store_<provider>_<model>/` | `paperfind fetch --rebuild-vectors` | ChromaDB vector embeddings for daily papers |
-| `zotero_vectors_<provider>_<model>/` | `paperfind embed` | ChromaDB vector embeddings for Zotero items |
-| `.env` | Manual | Optional: API keys (can also be in current directory) |
-
-### What Happens on Repeated Runs
-
-| Command | Behavior |
-|---------|----------|
-| `paperfind sync` | **Upserts** all items from your entire Zotero library. Updates existing items, adds new ones, and refreshes collection memberships. Safe to run multiple times. |
-| `paperfind embed <collection>` | **Skips** items already embedded. Only embeds new items in the collection. Use `--force` to re-embed all. |
-| `paperfind fetch` | **Upserts** papers (updates existing records, adds new ones). Running daily accumulates papers over time. |
-| `paperfind fetch --rebuild-vectors` | Fetches papers (upsert), then **recreates** the entire vector store from the database. |
-| `paperfind fetch --vectors-only` | **Recreates** the vector store from existing database without fetching new papers. |
-| `paperfind digest` | **Tracks** sent recommendations to avoid repeats. Records expire after 30 days. |
-| `paperfind prune --older-than N` | **Deletes** papers older than N days from both the database and vector store. Use `--dry-run` to preview. |
+| File/Directory | Description | Commands |
+|----------------|-------------|----------|
+| `daily_papers.db` | SQLite database of harvested papers | `fetch` upserts; `prune` deletes old; `digest` tracks sent DOIs |
+| `zotero_meta.db` | SQLite database of your Zotero library | `sync` upserts all items and collections |
+| `chroma_store_<provider>_<model>/` | Vector embeddings for daily papers | `fetch --rebuild-vectors` recreates; `prune` removes old |
+| `zotero_vectors_<provider>_<model>/` | Vector embeddings for Zotero items | `embed` adds new (use `--force` to re-embed all) |
+| `.env` | API keys and configuration | Manual |
 
 For database schema details, see [src/README.md](src/README.md#database-schemas).
 

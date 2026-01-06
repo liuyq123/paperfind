@@ -9,6 +9,7 @@ from langchain_core.documents import Document
 from paperfind.vectorstore import (
     _build_filter_clause,
     _normalize_metadata,
+    _relevance_to_distance,
     _sanitize_identifier,
     _truncate_identifier,
     get_embeddings_from_store,
@@ -225,7 +226,24 @@ class TestSimilaritySearchByVector:
         result = similarity_search_by_vector(mock_store, [0.1, 0.2], k=3)
 
         mock_store.similarity_search_by_vector_with_relevance_scores.assert_called_once()
-        assert result == [(doc, 0.8)]
+        assert result == [(doc, pytest.approx(0.2))]
+
+    def test_relevance_scores_normalize_to_distance(self):
+        mock_store = MagicMock()
+        doc_best = Document(page_content="Best", metadata={})
+        doc_worse = Document(page_content="Worse", metadata={})
+        mock_store.similarity_search_by_vector_with_relevance_scores.return_value = [
+            (doc_best, 0.9),
+            (doc_worse, 0.1),
+        ]
+
+        result = similarity_search_by_vector(mock_store, [0.1, 0.2], k=2)
+
+        assert result == [
+            (doc_best, pytest.approx(0.1)),
+            (doc_worse, pytest.approx(0.9)),
+        ]
+        assert result[0][1] < result[1][1]
 
     def test_langchain_store_without_scores_fallback(self):
         mock_store = MagicMock(spec=["similarity_search_by_vector"])
@@ -242,3 +260,56 @@ class TestSimilaritySearchByVector:
 
         with pytest.raises(NotImplementedError):
             similarity_search_by_vector(mock_store, [0.1, 0.2], k=3)
+
+
+class TestRelevanceToDistance:
+    """Tests for _relevance_to_distance."""
+
+    def test_normal_range_scores(self):
+        """Scores in [0, 1] use formula: distance = 1 - score."""
+        assert _relevance_to_distance(0.0) == 1.0  # 0.0 relevance -> 1.0 distance (worst)
+        assert _relevance_to_distance(0.5) == pytest.approx(0.5)
+        assert _relevance_to_distance(1.0) == pytest.approx(0.0)  # 1.0 relevance -> 0.0 distance (best)
+
+    def test_scores_above_one_preserve_ordering(self):
+        """Scores > 1.0 should not collapse to 0.0 and should preserve ordering."""
+        d1 = _relevance_to_distance(1.5)
+        d2 = _relevance_to_distance(2.0)
+        d3 = _relevance_to_distance(3.0)
+
+        # All should be > 0 (not clamped)
+        assert d1 > 0.0
+        assert d2 > 0.0
+        assert d3 > 0.0
+
+        # Higher relevance should mean lower distance (ordering preserved)
+        assert d1 > d2 > d3
+
+    def test_scores_above_one_use_inverse_formula(self):
+        """Scores > 1.0 use formula: distance = 1/(1+score)."""
+        assert _relevance_to_distance(1.5) == pytest.approx(1.0 / 2.5)  # 0.4
+        assert _relevance_to_distance(2.0) == pytest.approx(1.0 / 3.0)  # 0.333...
+        assert _relevance_to_distance(3.0) == pytest.approx(1.0 / 4.0)  # 0.25
+
+    def test_negative_scores_return_one(self):
+        """Negative scores should return 1.0 (worst distance)."""
+        assert _relevance_to_distance(-0.5) == 1.0
+        assert _relevance_to_distance(-1.0) == 1.0
+        assert _relevance_to_distance(-100.0) == 1.0
+
+    def test_zero_score_returns_one(self):
+        """Zero score should return 1.0 (worst distance)."""
+        assert _relevance_to_distance(0.0) == 1.0
+
+    def test_invalid_types_return_one(self):
+        """Invalid types should return 1.0."""
+        assert _relevance_to_distance(None) == 1.0
+        assert _relevance_to_distance("not a number") == 1.0
+        assert _relevance_to_distance([0.5]) == 1.0
+        assert _relevance_to_distance({"score": 0.5}) == 1.0
+
+    def test_string_numbers_are_converted(self):
+        """String representations of numbers should be converted."""
+        assert _relevance_to_distance("0.5") == pytest.approx(0.5)
+        assert _relevance_to_distance("1.0") == pytest.approx(0.0)
+        assert _relevance_to_distance("2.0") == pytest.approx(1.0 / 3.0)

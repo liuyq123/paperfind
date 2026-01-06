@@ -368,7 +368,7 @@ def list_papers(
 def recommend(
     k: int = Query(default=10, ge=1, le=100, description="Number of recommendations"),
     collection: Optional[str] = Query(default=None, description="Zotero collection name"),
-    rerank: bool = Query(default=True, description="Enable cross-encoder reranking"),
+    rerank: bool = Query(default=False, description="Enable cross-encoder reranking"),
     rerank_candidates: int = Query(default=50, ge=1, description="Candidate pool for reranking"),
 ) -> RecommendResponse:
     """Get paper recommendations based on your Zotero library."""
@@ -551,7 +551,8 @@ def fetch(
     background_tasks: BackgroundTasks,
     days: int = Query(default=1, ge=1, le=30, description="Number of days to fetch"),
     sources: Optional[str] = Query(
-        default=None, description="Comma-separated sources: crossref,biorxiv,medrxiv,arxiv"
+        default=None,
+        description="Comma-separated sources: crossref,biorxiv,medrxiv,arxiv,chemrxiv",
     ),
     rebuild_vectors: bool = Query(default=False, description="Rebuild vectors after fetching"),
 ) -> JobResponse:
@@ -559,7 +560,7 @@ def fetch(
     source_list = None
     if sources:
         source_list = [s.strip() for s in sources.split(",")]
-        valid_sources = {"crossref", "biorxiv", "medrxiv", "arxiv"}
+        valid_sources = {"crossref", "biorxiv", "medrxiv", "arxiv", "chemrxiv"}
         invalid = set(source_list) - valid_sources
         if invalid:
             raise HTTPException(

@@ -118,6 +118,7 @@ def search_with_scores(
     query: str,
     k: int = 5,
     source: str = "daily_papers",
+    collection: Optional[str] = None,
 ) -> List[Tuple[Document, float]]:
     """
     Perform semantic search and return results with similarity scores.
@@ -126,13 +127,31 @@ def search_with_scores(
         query: Search query string
         k: Number of results to return
         source: "daily_papers" or "zotero"
+        collection: Filter by Zotero collection (zotero source only)
 
     Returns:
         List of (document, score) tuples
     """
     vectordb = get_vectordb(source)
     warn_if_empty(vectordb, source)
-    results = vectordb.similarity_search_with_score(query, k=k)
+
+    allowed_keys: Optional[Set[str]] = None
+    if collection and source == "zotero":
+        allowed_keys = get_collection_zotero_keys(collection)
+        if not allowed_keys:
+            logger.warning(f"Collection '{collection}' not found or empty.")
+            return []
+
+    search_k = k * 3 if allowed_keys else k
+    results = vectordb.similarity_search_with_score(query, k=search_k)
+
+    if allowed_keys:
+        results = [
+            (doc, score)
+            for doc, score in results
+            if doc.metadata.get("zotero_key") in allowed_keys
+        ][:k]
+
     return results
 
 
@@ -200,14 +219,19 @@ def run_search(
     if rag:
         logger.info(f"Answering question using RAG ({source})...")
         answer = rag_query(query, k=num_results, source=source)
-        print(answer)
+        logger.info(answer)
     else:
         logger.info(f"Searching {source} for: {query}")
 
         if scores:
-            results = search_with_scores(query, k=num_results, source=source)
+            results = search_with_scores(
+                query,
+                k=num_results,
+                source=source,
+                collection=collection,
+            )
             for i, (doc, score) in enumerate(results):
-                print(format_document(doc, rank=i + 1, score=score))
+                logger.info(format_document(doc, rank=i + 1, score=score))
         else:
             results = search(
                 query,
@@ -216,6 +240,6 @@ def run_search(
                 collection=collection,
             )
             for i, doc in enumerate(results):
-                print(format_document(doc, rank=i + 1))
+                logger.info(format_document(doc, rank=i + 1))
 
-    print()
+    logger.info("")

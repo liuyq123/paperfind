@@ -211,7 +211,7 @@ def _rerank_recommendations(
 def get_recommendations(
     k: int = 10,
     collection: Optional[str] = None,
-    rerank: bool = True,
+    rerank: bool = False,
     rerank_candidates: int = 50,
     return_rerank_used: bool = False,
     max_age_days: Optional[int] = None,
@@ -349,7 +349,7 @@ def format_markdown(
     recommendations: RecommendationList,
     today: str,
     collection: Optional[str] = None,
-    rerank: bool = True,
+    rerank: bool = False,
 ) -> str:
     """Format recommendations as a markdown document."""
     lines = [
@@ -387,7 +387,7 @@ def run_recommend(
     num_results: int = 10,
     collection: Optional[str] = None,
     output: Optional[str] = None,
-    rerank: bool = True,
+    rerank: bool = False,
     rerank_candidates: int = 50,
     max_age_days: Optional[int] = None,
 ) -> None:
@@ -426,7 +426,7 @@ def run_recommend(
         score_label = "Rerank score" if rerank_used else None
         show_similarity = not rerank_used
         for rank, (doi, (score, doc, zotero_title)) in enumerate(recommendations, 1):
-            print(format_document(
+            logger.info(format_document(
                 doc,
                 rank=rank,
                 score=score,
@@ -434,4 +434,4 @@ def run_recommend(
                 show_score_as_similarity=show_similarity,
                 score_label=score_label,
             ))
-        print()
+        logger.info("")

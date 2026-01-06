@@ -130,6 +130,49 @@ class TestSearchWithScores:
 
         mock_get_db.assert_called_once_with("daily_papers")
 
+    @patch("paperfind.search.search.get_vectordb")
+    @patch("paperfind.search.search.warn_if_empty")
+    @patch("paperfind.search.search.get_collection_zotero_keys")
+    def test_search_with_scores_collection_filter(
+        self, mock_get_keys, mock_warn, mock_get_db
+    ):
+        mock_db = MagicMock()
+        docs_with_scores = [
+            (Document(page_content="Paper 1", metadata={"zotero_key": "key1"}), 0.1),
+            (Document(page_content="Paper 2", metadata={"zotero_key": "key2"}), 0.2),
+            (Document(page_content="Paper 3", metadata={"zotero_key": "key3"}), 0.3),
+        ]
+        mock_db.similarity_search_with_score.return_value = docs_with_scores
+        mock_get_db.return_value = mock_db
+        mock_get_keys.return_value = {"key1", "key3"}
+
+        results = search_with_scores(
+            "query",
+            k=2,
+            source="zotero",
+            collection="my-collection",
+        )
+
+        mock_db.similarity_search_with_score.assert_called_once_with("query", k=6)
+        assert len(results) == 2
+        assert results[0][0].metadata["zotero_key"] == "key1"
+        assert results[1][0].metadata["zotero_key"] == "key3"
+
+    @patch("paperfind.search.search.get_vectordb")
+    @patch("paperfind.search.search.warn_if_empty")
+    @patch("paperfind.search.search.get_collection_zotero_keys")
+    def test_search_with_scores_empty_collection(
+        self, mock_get_keys, mock_warn, mock_get_db
+    ):
+        mock_db = MagicMock()
+        mock_get_db.return_value = mock_db
+        mock_get_keys.return_value = set()
+
+        results = search_with_scores("query", k=5, source="zotero", collection="empty")
+
+        assert results == []
+        mock_db.similarity_search_with_score.assert_not_called()
+
 
 class TestSearchUtils:
     """Tests for search utility functions."""

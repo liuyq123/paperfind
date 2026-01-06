@@ -32,7 +32,7 @@ def _is_valid_url(url: str) -> bool:
 def render_digest(
     recommendations: List[Recommendation],
     digest_date: date,
-    rerank: bool = True,
+    rerank: bool = False,
 ) -> str:
     """
     Render recommendations as an HTML email.

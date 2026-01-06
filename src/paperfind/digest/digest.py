@@ -33,7 +33,7 @@ def run_digest(
     collection: Optional[str] = None,
     dry_run: bool = False,
     skip_fetch: bool = False,
-    rerank: bool = True,
+    rerank: bool = False,
     max_age_days: Optional[int] = None,
 ) -> None:
     """
@@ -47,7 +47,7 @@ def run_digest(
         collection: Optional Zotero collection to base recommendations on
         dry_run: If True, print HTML instead of sending email
         skip_fetch: If True, skip fetching and use existing papers
-        rerank: If True, use cross-encoder reranking (default: True)
+        rerank: If True, use cross-encoder reranking (default: False)
         max_age_days: Only recommend papers published within this many days
     """
     today = date.today()
@@ -103,7 +103,7 @@ def run_digest(
         logger.info("=" * 50)
         logger.info("Dry run - HTML output:")
         logger.info("=" * 50)
-        print(html)
+        logger.info(html)
     else:
         logger.info("=" * 50)
         logger.info("Step 4: Sending email")

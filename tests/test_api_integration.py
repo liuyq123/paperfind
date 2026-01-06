@@ -6,7 +6,9 @@ from langchain_core.documents import Document
 
 pytest.importorskip("fastapi")
 
-from paperfind.api import list_papers, recommend, search_papers
+from fastapi import BackgroundTasks
+
+from paperfind.api import fetch, list_papers, recommend, search_papers
 import paperfind.search.utils as utils_module
 
 # Import modules directly to avoid name shadowing from __init__.py
@@ -223,3 +225,9 @@ class TestListPapersSourceFilter:
         count_call = calls[0]
         # No WHERE clause
         assert "WHERE" not in count_call[0][0]
+
+
+def test_fetch_accepts_chemrxiv_source() -> None:
+    response = fetch(background_tasks=BackgroundTasks(), sources="chemrxiv")
+
+    assert response.job_type == "fetch"

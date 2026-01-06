@@ -129,7 +129,7 @@ def main() -> None:
         default=None,
         help="Only recommend papers published within this many days",
     )
-    rec_parser.set_defaults(rerank=True)
+    rec_parser.set_defaults(rerank=False)
 
     # Search command
     search_parser = subparsers.add_parser("search", help="Semantic search across papers")
@@ -273,7 +273,7 @@ def main() -> None:
 
         logger = get_logger(__name__)
         if args.data_dir:
-            print(DATA_DIR)
+            logger.info(DATA_DIR)
         elif args.check:
             status = get_config_status()
             logger.info(f"Data directory: {status['data_dir']}")

@@ -15,7 +15,7 @@ ZoteroPaper = Dict[str, Any]
 
 # Recommendation tuple: (doi, (score, document, zotero_title))
 # - doi: DOI of the recommended paper
-# - score: similarity/rerank score (higher is better)
+# - score: distance from vector search (lower is better) or rerank score (higher is better)
 # - document: langchain Document with paper content and metadata
 # - zotero_title: title of the Zotero paper this recommendation is based on
 Recommendation = Tuple[str, Tuple[float, Document, str]]
