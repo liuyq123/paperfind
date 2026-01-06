@@ -158,6 +158,46 @@ class TestGetRecommendations:
     @patch("paperfind.search.recommend.get_vector_store")
     @patch("paperfind.search.recommend.get_embeddings_from_store")
     @patch("paperfind.search.recommend.similarity_search_by_vector")
+    def test_exclude_dois_case_insensitive(
+        self,
+        mock_search,
+        mock_get_embeddings,
+        mock_get_store,
+        mock_get_dois,
+        mock_get_papers,
+        mock_store_exists,
+        mock_check,
+    ):
+        mock_check.return_value = True
+        mock_store_exists.return_value = True
+        mock_get_papers.return_value = [
+            {"zotero_key": "key1", "title": "Paper 1", "abstract": "Abstract 1"}
+        ]
+        mock_get_dois.return_value = set()
+        mock_get_store.return_value = MagicMock()
+        mock_get_embeddings.return_value = {"key1": [0.1, 0.2, 0.3]}
+
+        doc = Document(
+            page_content="Test",
+            metadata={"doi": "10.1234/new", "title": "New Paper"},
+        )
+        mock_search.return_value = [(doc, 0.5)]
+
+        result = get_recommendations(
+            k=5,
+            rerank=False,
+            exclude_dois={"10.1234/NEW"},
+        )
+
+        assert result == []
+
+    @patch("paperfind.search.recommend.check_vector_store")
+    @patch("paperfind.search.recommend.vector_store_exists")
+    @patch("paperfind.search.recommend.get_zotero_papers")
+    @patch("paperfind.search.recommend.get_zotero_dois")
+    @patch("paperfind.search.recommend.get_vector_store")
+    @patch("paperfind.search.recommend.get_embeddings_from_store")
+    @patch("paperfind.search.recommend.similarity_search_by_vector")
     def test_returns_rerank_used_flag(
         self,
         mock_search,

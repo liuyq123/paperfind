@@ -31,7 +31,7 @@ def fetch_arxiv(category: str, days: int = 7) -> List[PaperDict]:
     """Fetch papers from arXiv for a category with pagination."""
     papers: List[PaperDict] = []
     query = f"cat:{category}"
-    cutoff_date = date.today() - timedelta(days=days)
+    cutoff_date = date.today() - timedelta(days=days - 1)
     start = 0
 
     for _ in range(MAX_PAGES):

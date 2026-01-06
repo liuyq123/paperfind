@@ -26,7 +26,7 @@ def _get_cross_encoder(model: str) -> Any:
     except ImportError as exc:
         raise ImportError(
             "Reranking requires sentence-transformers. "
-            "Install with: pip install sentence-transformers"
+            "Install with: pip install paperfind[huggingface]"
         ) from exc
 
     return CrossEncoder(model)

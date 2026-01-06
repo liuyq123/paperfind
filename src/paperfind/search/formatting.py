@@ -23,9 +23,9 @@ def format_document(
     Args:
         doc: The document to format
         rank: Display rank (1-indexed)
-        score: Optional similarity/distance score
+        score: Optional cosine distance score (0 = identical, 1 = orthogonal)
         similar_to: Optional title of the paper this is similar to
-        show_score_as_similarity: If True, convert score to similarity percentage
+        show_score_as_similarity: If True, convert cosine distance to similarity %
         score_label: Optional label to display for the score
 
     Returns:
@@ -39,7 +39,7 @@ def format_document(
         if score_label:
             header += f" ({score_label}: {score:.4f})"
         elif show_score_as_similarity:
-            similarity = 1 / (1 + score)
+            similarity = max(0.0, 1 - score)  # Convert cosine distance to similarity
             header += f" (similarity: {similarity:.2%})"
         else:
             header += f" (score: {score:.4f})"
@@ -96,11 +96,11 @@ def format_markdown_recommendation(
     Args:
         rank: Display rank (1-indexed)
         doi: Paper DOI
-        score: Distance score
+        score: Cosine distance score (0 = identical, 1 = orthogonal)
         doc: The document
         similar_to: Title of the Zotero paper this is similar to
         score_label: Optional label to display for the score
-        show_score_as_similarity: If True, convert score to similarity percentage
+        show_score_as_similarity: If True, convert cosine distance to similarity %
 
     Returns:
         Markdown formatted string
@@ -123,7 +123,7 @@ def format_markdown_recommendation(
             doi_link = f"https://doi.org/{doi}"
 
     if show_score_as_similarity:
-        similarity = 1 / (1 + score)
+        similarity = max(0.0, 1 - score)  # Convert cosine distance to similarity
         score_line = f"**Similarity:** {similarity:.1%} to *{similar_to}*"
     else:
         label = score_label or "Score"

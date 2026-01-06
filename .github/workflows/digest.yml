@@ -61,9 +61,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.PAPERFIND_DATA_DIR }}
-          key: ${{ runner.os }}-paperfind-data-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-paperfind-data-
+          key: ${{ runner.os }}-paperfind-data
 
       - name: Sync Zotero library
         run: |

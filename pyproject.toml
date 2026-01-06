@@ -8,14 +8,13 @@ version = "0.1.0"
 description = "Paper recommendation system based on your Zotero library"
 readme = "README.md"
 license = {text = "Apache-2.0"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["papers", "research", "zotero", "recommendations", "semantic-search"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -28,7 +27,6 @@ dependencies = [
     "langchain-chroma>=0.1.0",
     "chromadb>=0.4.0",
     "openai>=1.0.0",
-    "sentence-transformers>=2.2.0",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +40,7 @@ ollama = [
 ]
 huggingface = [
     "langchain-huggingface>=0.0.1",
+    "sentence-transformers>=2.2.0",
 ]
 postgres = [
     "psycopg[binary]>=3.1.0",
@@ -68,8 +67,8 @@ where = ["src"]
 
 [tool.black]
 line-length = 100
-target-version = ["py39"]
+target-version = ["py310"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"

@@ -507,8 +507,9 @@ def similarity_search_by_vector(
             k=k,
             **kwargs,
         )
-        # Normalize relevance (higher is better) to distance (lower is better).
-        return [(doc, _relevance_to_distance(score)) for doc, score in results]
+        # Note: Despite the method name, Chroma returns distance-like scores
+        # where lower = more similar. No conversion needed.
+        return list(results)
 
     # Fallback: some stores return without scores
     if hasattr(vectordb, "similarity_search_by_vector"):
@@ -516,26 +517,6 @@ def similarity_search_by_vector(
         return [(doc, 0.0) for doc in docs]
 
     raise NotImplementedError(f"Vector store {type(vectordb)} does not support similarity_search_by_vector")
-
-
-def _relevance_to_distance(score: Any) -> float:
-    """Convert relevance score (higher is better) to distance (lower is better).
-
-    Uses the formula: distance = 1 - score for scores in [0, 1].
-    For scores > 1.0, uses 1/(1+score) to map (1, inf) -> (0, 0.5) while
-    preserving ordering. This prevents high scores from collapsing to 0.0.
-    """
-    try:
-        s = float(score)
-    except (TypeError, ValueError):
-        return 1.0
-    if s <= 0.0:
-        return 1.0
-    if s > 1.0:
-        # Scores > 1 would produce negative distances with (1 - s).
-        # Use 1/(1+s) to map (1, inf) -> (0, 0.5) while preserving order.
-        return 1.0 / (1.0 + s)
-    return 1.0 - s
 
 
 def _normalize_metadata(value: Any) -> Dict[str, Any]:

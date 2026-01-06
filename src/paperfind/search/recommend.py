@@ -85,16 +85,10 @@ def get_collection_id_by_name(collection_name: str) -> Optional[int]:
 
     if not row:
         # Try by name (case-insensitive)
-        if is_postgres():
-            cur.execute(
-                f"SELECT id FROM {table} WHERE LOWER(name) = LOWER({ph})",
-                (collection_name,)
-            )
-        else:
-            cur.execute(
-                f"SELECT id FROM {table} WHERE LOWER(name) = LOWER({ph})",
-                (collection_name,)
-            )
+        cur.execute(
+            f"SELECT id FROM {table} WHERE LOWER(name) = LOWER({ph})",
+            (collection_name,)
+        )
         row = cur.fetchone()
 
     conn.close()
@@ -261,6 +255,7 @@ def get_recommendations(
 
     # Get DOIs to exclude (already in library)
     existing_dois = get_zotero_dois()
+    exclude_dois_normalized = {doi.lower() for doi in exclude_dois} if exclude_dois else set()
 
     # Load vector stores
     zotero_vectordb = get_vector_store("zotero")
@@ -311,12 +306,14 @@ def get_recommendations(
             if not doi:
                 continue
 
+            doi_lower = doi.lower()
+
             # Skip if already in Zotero
-            if doi.lower() in existing_dois:
+            if doi_lower in existing_dois:
                 continue
 
             # Skip if in exclude list (e.g., previously sent)
-            if exclude_dois and doi in exclude_dois:
+            if exclude_dois_normalized and doi_lower in exclude_dois_normalized:
                 continue
 
             # Skip if paper is older than cutoff date
@@ -392,9 +389,9 @@ def run_recommend(
     max_age_days: Optional[int] = None,
 ) -> None:
     """Run paper recommendations with parsed parameters."""
-    logger.info("=" * 60)
-    logger.info("Paper Recommendations Based on Your Zotero Library")
-    logger.info("=" * 60)
+    print("=" * 60)
+    print("Paper Recommendations Based on Your Zotero Library")
+    print("=" * 60)
 
     recommendations, rerank_used = get_recommendations(
         k=num_results,
@@ -422,11 +419,11 @@ def run_recommend(
         logger.info(f"Saved {len(recommendations)} recommendations to {output}")
     else:
         # Print to console
-        logger.info(f"Top {len(recommendations)} recommendations:")
+        print(f"\nTop {len(recommendations)} recommendations:\n")
         score_label = "Rerank score" if rerank_used else None
         show_similarity = not rerank_used
         for rank, (doi, (score, doc, zotero_title)) in enumerate(recommendations, 1):
-            logger.info(format_document(
+            print(format_document(
                 doc,
                 rank=rank,
                 score=score,
@@ -434,4 +431,3 @@ def run_recommend(
                 show_score_as_similarity=show_similarity,
                 score_label=score_label,
             ))
-        logger.info("")

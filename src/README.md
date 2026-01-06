@@ -1,7 +1,6 @@
-# Developer Guide
+# Internals
 
-This document centralizes developer-facing documentation (architecture, extension points, API, tests).
-User-facing usage remains in the root `README.md`.
+Architecture, extension points, and API reference. User-facing docs are in the root [README.md](../README.md).
 
 ## Project Structure
 

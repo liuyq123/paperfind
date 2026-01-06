@@ -1,46 +1,43 @@
 # Tests
 
-This folder contains unit and light integration tests for Paperfind.
+Unit and integration tests for Paperfind.
 
 ## Setup
-
-Install dev dependencies first:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-## Test Files
-
-| File | Description | Requires API? |
-|------|-------------|---------------|
-| `test_cli.py` | Module imports and CLI help commands | No |
-| `test_documents.py` | Metadata-first title/abstract extraction and fallbacks | No |
-| `test_formatting.py` | Console/markdown formatting uses metadata fields | No |
-| `test_digest_template.py` | HTML digest uses metadata and link formatting | No |
-| `test_api_integration.py` | API handlers with mocked HTTP backends | Requires `[api]` |
-
-## How to Run
+## Running Tests
 
 ```bash
-# Run all tests
-pytest
-
-# Run with verbose output
-pytest -v
-
-# Run a single file
-pytest tests/test_documents.py
-
-# Run a single test
-pytest tests/test_documents.py::test_extract_title
-
-# Run with coverage
-pytest --cov=paperfind --cov-report=term-missing
+pytest                    # Run all tests
+pytest -v                 # Verbose output
+pytest tests/test_cli.py  # Single file
+pytest --cov=paperfind    # With coverage
 ```
 
-## Writing Tests
+## Test Files
 
-- All external API calls should be mocked/monkeypatched
-- Use fixtures from `conftest.py` where available
-- Keep tests fast - no real network calls
+| File | Description |
+|------|-------------|
+| `test_api_integration.py` | API endpoints (requires `[api]`) |
+| `test_cli.py` | CLI commands and module imports |
+| `test_config.py` | Configuration and paths |
+| `test_digest_integration.py` | Digest workflow end-to-end |
+| `test_digest_template.py` | HTML email template rendering |
+| `test_documents.py` | Title/abstract extraction |
+| `test_fetchers.py` | Paper source fetchers |
+| `test_formatting.py` | Console and markdown formatting |
+| `test_recommend.py` | Recommendation engine |
+| `test_rerank.py` | Cross-encoder reranking |
+| `test_retry.py` | Retry logic for API calls |
+| `test_search.py` | Semantic search |
+| `test_sent_recommendations.py` | Sent DOI tracking |
+| `test_vectorstore.py` | Vector store backends |
+
+## Guidelines
+
+- Mock all external API calls
+- Use fixtures from `conftest.py`
+- No real network calls

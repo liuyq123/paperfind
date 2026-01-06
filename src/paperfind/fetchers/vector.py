@@ -101,7 +101,23 @@ def upsert_vectors_for_dois(dois: List[str], batch_size: int = DEFAULT_BATCH_SIZ
             continue
 
         ids = [str(doc.metadata["doi"]) for doc in docs]
-        vectordb.add_documents(docs, ids=ids)
+
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                vectordb.add_documents(docs, ids=ids)
+                break
+            except Exception as e:
+                if "rate_limit" in str(e).lower() or "429" in str(e):
+                    wait_time = (2**attempt) + 1
+                    logger.warning(f"Rate limited. Waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                else:
+                    raise
+        else:
+            logger.error(f"Failed after {max_retries} retries, skipping batch")
+            continue
+
         total_docs += len(docs)
 
     conn.close()

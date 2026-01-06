@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-A paper recommendation system that discovers relevant papers and preprints based on your Zotero library. It fetches metadata from CrossRef, bioRxiv, medRxiv, arXiv, and ChemRxiv, then uses semantic search and cross-encoder reranking to recommend papers similar to your existing research interests.
+A paper recommendation system that discovers relevant papers based on your Zotero library. Fetches from CrossRef, bioRxiv, medRxiv, arXiv, and ChemRxiv, then uses semantic search to recommend papers matching your research interests.
 
 ## Table of Contents
 
@@ -30,11 +30,11 @@ A paper recommendation system that discovers relevant papers and preprints based
 
 ## Features
 
-- **Paper Recommendations**: Get daily paper recommendations based on your Zotero library
-- **Paper Harvesting**: Fetches paper metadata (title, authors, abstract) from CrossRef, bioRxiv, medRxiv, arXiv, and ChemRxiv
-- **Zotero Integration**: Syncs with your personal Zotero library to understand your research interests
-- **Semantic Search**: Search across papers using OpenAI embeddings and ChromaDB
-- **RAG Pipeline**: Ask questions about your paper collection using GPT-4
+- **Recommendations**: Discover papers similar to your Zotero library
+- **Multi-source Fetching**: CrossRef, bioRxiv, medRxiv, arXiv, ChemRxiv
+- **Semantic Search**: Vector search with OpenAI, Ollama, or HuggingFace embeddings
+- **RAG**: Ask questions about your paper collection
+- **Email Digest**: Scheduled recommendations via GitHub Actions
 
 ## Installation
 
@@ -364,7 +364,7 @@ For database schema details, see [src/README.md](src/README.md#database-schemas)
 
 ## Developer Docs
 
-Developer guide and architecture notes live in [src/README.md](src/README.md).  
+Project internals and architecture live in [src/README.md](src/README.md).
 Test setup and commands live in [tests/README.md](tests/README.md).
 
 ## License

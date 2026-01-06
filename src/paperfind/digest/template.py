@@ -66,7 +66,7 @@ def render_digest(
         if rerank:
             score_line = f"Rerank score {score:.4f}"
         else:
-            similarity = 1 / (1 + score)
+            similarity = max(0.0, 1 - score)  # Convert cosine distance to similarity
             score_line = f"{similarity:.0%} similar"
 
         title_display = escape(title)

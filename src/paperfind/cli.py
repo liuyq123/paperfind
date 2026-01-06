@@ -109,7 +109,7 @@ def main() -> None:
     rec_parser.add_argument(
         "--rerank",
         action="store_true",
-        help="Rerank recommendations with a cross-encoder (default)",
+        help="Rerank recommendations with a cross-encoder",
     )
     rec_parser.add_argument(
         "--no-rerank",
@@ -194,9 +194,9 @@ def main() -> None:
         "--skip-fetch", action="store_true", help="Skip fetching, use existing papers"
     )
     digest_parser.add_argument(
-        "--no-rerank",
+        "--rerank",
         action="store_true",
-        help="Disable cross-encoder reranking",
+        help="Enable cross-encoder reranking",
     )
     digest_parser.add_argument(
         "--max-age",
@@ -311,7 +311,7 @@ def main() -> None:
             collection=args.collection,
             dry_run=args.dry_run,
             skip_fetch=args.skip_fetch,
-            rerank=not args.no_rerank,
+            rerank=args.rerank,
             max_age_days=args.max_age,
         )
 
