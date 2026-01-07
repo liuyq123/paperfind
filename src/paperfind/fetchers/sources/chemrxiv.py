@@ -1,7 +1,7 @@
 """ChemRxiv fetcher."""
 
 from datetime import date
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -15,12 +15,18 @@ CHEMRXIV_API = "https://chemrxiv.org/engage/chemrxiv/public-api/v1/items"
 PAGE_SIZE = 50  # ChemRxiv API limit
 
 
-def fetch_chemrxiv(start_date: date, end_date: date) -> List[PaperDict]:
+def fetch_chemrxiv(
+    start_date: date,
+    end_date: date,
+    categories: Optional[List[str]] = None,
+) -> List[PaperDict]:
     """Fetch preprints from ChemRxiv.
 
     Args:
         start_date: Start of date range (inclusive)
         end_date: End of date range (inclusive)
+        categories: List of category IDs to filter by. If empty, fetches all.
+                    See https://chemrxiv.org/engage/chemrxiv/public-api/v1/categories
 
     Returns:
         List of paper dictionaries
@@ -30,6 +36,10 @@ def fetch_chemrxiv(start_date: date, end_date: date) -> List[PaperDict]:
 
     while True:
         params: Dict[str, Any] = {"limit": PAGE_SIZE, "skip": skip}
+
+        # Add category filter if specified
+        if categories:
+            params["categoryIds"] = ",".join(categories)
 
         try:
             resp = retry_request(

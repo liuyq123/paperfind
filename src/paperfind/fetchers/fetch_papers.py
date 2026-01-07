@@ -14,7 +14,12 @@ import time
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 
-from paperfind.config import BIORXIV_CATEGORIES, DAILY_PAPERS_DB, MEDRXIV_CATEGORIES
+from paperfind.config import (
+    BIORXIV_CATEGORIES,
+    CHEMRXIV_CATEGORIES,
+    DAILY_PAPERS_DB,
+    MEDRXIV_CATEGORIES,
+)
 from paperfind.fetchers.db import init_db, upsert_work
 from paperfind.fetchers.sources.arxiv import ARXIV_CATEGORIES, fetch_arxiv
 from paperfind.fetchers.sources.biorxiv import fetch_biorxiv
@@ -164,7 +169,7 @@ def fetch_all(
     # ChemRxiv
     if "chemrxiv" in sources:
         logger.info("[ChemRxiv] Fetching preprints...")
-        chemrxiv_papers = fetch_chemrxiv(start_date, end_date)
+        chemrxiv_papers = fetch_chemrxiv(start_date, end_date, categories=CHEMRXIV_CATEGORIES)
 
         for paper in chemrxiv_papers:
             upsert_work(conn, paper)

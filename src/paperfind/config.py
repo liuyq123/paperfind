@@ -2,16 +2,51 @@
 Configuration and path management for Paperfind.
 
 Data is stored in ~/.paperfind/ by default, or in PAPERFIND_DATA_DIR if set.
+
+Config loading priority:
+1. Explicit path via load_config(config_path)
+2. PAPERFIND_CONFIG environment variable
+3. .env file in current directory
+4. Error with helpful instructions
 """
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
+# Track whether config has been loaded
+_config_loaded = False
+_config_path: Optional[Path] = None
+
+
+class ConfigNotLoadedError(Exception):
+    """Raised when config is accessed before load_config() is called."""
+
+    def __init__(self):
+        super().__init__(
+            "Configuration not loaded. Call load_config() first, or use --config flag."
+        )
+
+
+class ConfigFileNotFoundError(Exception):
+    """Raised when no .env file can be found."""
+
+    def __init__(self):
+        super().__init__(
+            "No .env file found.\n"
+            "Either:\n"
+            "  1. Create .env in current directory (see .env.example)\n"
+            "  2. Run with --config /path/to/.env\n"
+            "  3. Set PAPERFIND_CONFIG=/path/to/.env environment variable"
+        )
+
 
 def get_data_dir() -> Path:
-    """Get the data directory, creating it if needed."""
+    """Get the data directory, creating it if needed.
+    Returns PAPERFIND_DATA_DIR if set, otherwise ~/.paperfind.
+    """
     if os.getenv("PAPERFIND_DATA_DIR"):
         data_dir = Path(os.getenv("PAPERFIND_DATA_DIR"))
     else:
@@ -21,67 +56,136 @@ def get_data_dir() -> Path:
     return data_dir
 
 
-def load_config():
-    """Load configuration from .env file."""
-    # Try loading from current directory first
-    if Path(".env").exists():
-        load_dotenv(".env")
+def load_config(config_path: Optional[str] = None) -> Path:
+    """Load configuration from .env file.
 
-    # Then try data directory
-    data_dir = get_data_dir()
-    env_file = data_dir / ".env"
-    if env_file.exists():
-        load_dotenv(env_file)
+    Args:
+        config_path: Explicit path to .env file. If not provided, checks
+                     PAPERFIND_CONFIG env var, then local .env.
+
+    Returns:
+        Path to the loaded .env file.
+
+    Raises:
+        ConfigFileNotFoundError: If no .env file can be found.
+        FileNotFoundError: If explicit config_path doesn't exist.
+    """
+    global _config_loaded, _config_path
+
+    env_file: Optional[Path] = None
+
+    # Priority 1: Explicit path
+    if config_path:
+        env_file = Path(config_path)
+        if not env_file.exists():
+            raise FileNotFoundError(f"Config file not found: {env_file}")
+
+    # Priority 2: PAPERFIND_CONFIG env var
+    elif os.getenv("PAPERFIND_CONFIG"):
+        env_file = Path(os.getenv("PAPERFIND_CONFIG"))
+        if not env_file.exists():
+            raise FileNotFoundError(
+                f"Config file not found: {env_file} (from PAPERFIND_CONFIG)"
+            )
+
+    # Priority 3: Local .env
+    elif Path(".env").exists():
+        env_file = Path(".env")
+
+    # No config found
+    else:
+        raise ConfigFileNotFoundError()
+
+    load_dotenv(env_file, override=True)
+    _config_loaded = True
+    _config_path = env_file
+
+    # Reload module-level variables after loading config
+    _reload_config_values()
+
+    return env_file
 
 
-# Initialize on import
-load_config()
+def _reload_config_values():
+    """Reload all module-level config values from environment."""
+    global DATA_DIR, DAILY_PAPERS_DB, ZOTERO_DB
+    global OPENAI_API_KEY, ZOTERO_API_KEY, ZOTERO_USER_ID, ZOTERO_LIBRARY_TYPE
+    global CROSSREF_EMAIL, LLM_MODEL
+    global ARXIV_CATEGORIES, BIORXIV_CATEGORIES, MEDRXIV_CATEGORIES, CHEMRXIV_CATEGORIES
+    global SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, EMAIL_FROM, EMAIL_TO
 
-# Paths
-DATA_DIR = get_data_dir()
-DAILY_PAPERS_DB = DATA_DIR / "daily_papers.db"
-ZOTERO_DB = DATA_DIR / "zotero_meta.db"
+    # Paths
+    DATA_DIR = get_data_dir()
+    DAILY_PAPERS_DB = DATA_DIR / "daily_papers.db"
+    ZOTERO_DB = DATA_DIR / "zotero_meta.db"
+
+    # API Keys and settings
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    ZOTERO_API_KEY = os.getenv("ZOTERO_API_KEY")
+    ZOTERO_USER_ID = os.getenv("ZOTERO_USER_ID")
+    ZOTERO_LIBRARY_TYPE = os.getenv("ZOTERO_LIBRARY_TYPE", "user")
+    CROSSREF_EMAIL = os.getenv("CROSSREF_EMAIL")
+    LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+    # Paper source categories
+    ARXIV_CATEGORIES = _parse_categories(
+        "ARXIV_CATEGORIES", _DEFAULT_ARXIV_CATEGORIES, empty_fallback=_ALL_ARXIV_CATEGORIES
+    )
+    BIORXIV_CATEGORIES = _parse_categories(
+        "BIORXIV_CATEGORIES", _DEFAULT_BIORXIV_CATEGORIES, empty_fallback=[]
+    )
+    MEDRXIV_CATEGORIES = _parse_categories(
+        "MEDRXIV_CATEGORIES", _DEFAULT_MEDRXIV_CATEGORIES, empty_fallback=[]
+    )
+    CHEMRXIV_CATEGORIES = _parse_categories(
+        "CHEMRXIV_CATEGORIES", _DEFAULT_CHEMRXIV_CATEGORIES, empty_fallback=[]
+    )
+
+    # Email settings
+    SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    SMTP_PORT = int(os.getenv("SMTP_PORT") or "587")
+    SMTP_USER = os.getenv("SMTP_USER")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+    EMAIL_FROM = os.getenv("EMAIL_FROM")
+    EMAIL_TO = os.getenv("EMAIL_TO")
 
 
-def _get_model_suffix() -> str:
-    """Get sanitized provider and model name for directory suffix."""
-    from paperfind.embeddings import get_embedding_model, get_embedding_provider, sanitize_model_name
-
-    provider = get_embedding_provider()
-    model = sanitize_model_name(get_embedding_model())
-    return f"{provider}_{model}"
+def is_config_loaded() -> bool:
+    """Check if configuration has been loaded."""
+    return _config_loaded
 
 
-def get_chroma_store_dir() -> str:
-    """Get the ChromaDB store directory for the current model."""
-    return str(DATA_DIR / f"chroma_store_{_get_model_suffix()}")
+def get_loaded_config_path() -> Optional[Path]:
+    """Get the path to the loaded config file, or None if not loaded."""
+    return _config_path
 
 
-def get_zotero_vectors_dir() -> str:
-    """Get the Zotero vectors directory for the current model."""
-    return str(DATA_DIR / f"zotero_vectors_{_get_model_suffix()}")
+# =============================================================================
+# Default category lists (used by _parse_categories)
+# =============================================================================
 
-
-# API Keys and settings
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ZOTERO_API_KEY = os.getenv("ZOTERO_API_KEY")
-ZOTERO_USER_ID = os.getenv("ZOTERO_USER_ID")
-ZOTERO_LIBRARY_TYPE = os.getenv("ZOTERO_LIBRARY_TYPE", "user")
-CROSSREF_EMAIL = os.getenv("CROSSREF_EMAIL")
-
-# Model settings
-# Note: EMBEDDING_PROVIDER and EMBEDDING_MODEL are handled by paperfind.embeddings
-# with provider-specific defaults. Use get_embedding_provider() and get_embedding_model().
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
-
-# Paper source categories (configurable via comma-separated env vars)
 _DEFAULT_ARXIV_CATEGORIES = [
+    # Quantitative Biology (all subcategories)
     "q-bio.BM",        # Biomolecules
-    "q-bio.QM",        # Quantitative Methods
+    "q-bio.CB",        # Cell Behavior
+    "q-bio.GN",        # Genomics
     "q-bio.MN",        # Molecular Networks
-    "cs.LG",           # Machine Learning
+    "q-bio.NC",        # Neurons and Cognition
+    "q-bio.OT",        # Other Quantitative Biology
+    "q-bio.PE",        # Populations and Evolution
+    "q-bio.QM",        # Quantitative Methods
+    "q-bio.SC",        # Subcellular Processes
+    "q-bio.TO",        # Tissues and Organs
+    # AI/ML categories
     "cs.AI",           # Artificial Intelligence
+    "cs.CL",           # Computation and Language (NLP)
+    "cs.CV",           # Computer Vision
+    "cs.IR",           # Information Retrieval
+    "cs.LG",           # Machine Learning
+    "cs.NE",           # Neural and Evolutionary Computing
+    "cs.RO",           # Robotics
     "stat.ML",         # Machine Learning (Statistics)
+    # Physics
     "physics.chem-ph", # Chemical Physics
     "physics.bio-ph",  # Biological Physics
 ]
@@ -126,6 +230,7 @@ _ALL_ARXIV_CATEGORIES = [
     # Statistics
     "stat.AP", "stat.CO", "stat.ME", "stat.ML", "stat.OT", "stat.TH",
 ]
+
 _DEFAULT_BIORXIV_CATEGORIES = [
     "bioinformatics",
     "biochemistry",
@@ -135,54 +240,91 @@ _DEFAULT_BIORXIV_CATEGORIES = [
     "molecular-biology",
     "cell-biology",
     "genomics",
+    "genetics",
     "biophysics",
 ]
-_DEFAULT_MEDRXIV_CATEGORIES: list[str] = []
+
+_DEFAULT_MEDRXIV_CATEGORIES: list[str] = [
+    "genetic-and-genomic-medicine",
+    "health-informatics",
+]
+
+_DEFAULT_CHEMRXIV_CATEGORIES = [
+    "605c72ef153207001f6470d0",  # Biological and Medicinal Chemistry
+    "605c72ef153207001f6470ce",  # Theoretical and Computational Chemistry
+]
 
 
 def _parse_categories(
     env_var: str, defaults: list, empty_fallback: list | None = None
 ) -> list:
-    """Parse comma-separated category list from env var.
-
-    Args:
-        env_var: Name of the environment variable
-        defaults: Default categories if env var is not set
-        empty_fallback: Categories to use when env var is explicitly set to empty.
-                        If None, returns defaults. If empty list [], returns [].
-    """
+    """Parse comma-separated category list from env var."""
     value = os.getenv(env_var)
     if value is None:
         return defaults
     if value.strip() == "":
-        # Explicitly set to empty
         return empty_fallback if empty_fallback is not None else defaults
     return [c.strip() for c in value.split(",") if c.strip()]
 
 
-# arXiv: empty = fetch all categories (slow, ~100 categories)
-ARXIV_CATEGORIES = _parse_categories(
-    "ARXIV_CATEGORIES", _DEFAULT_ARXIV_CATEGORIES, empty_fallback=_ALL_ARXIV_CATEGORIES
-)
-# bioRxiv: empty = fetch all (no category filtering)
-BIORXIV_CATEGORIES = _parse_categories(
-    "BIORXIV_CATEGORIES", _DEFAULT_BIORXIV_CATEGORIES, empty_fallback=[]
-)
-# medRxiv: empty/default = fetch all (no category filtering)
-MEDRXIV_CATEGORIES = _parse_categories(
-    "MEDRXIV_CATEGORIES", _DEFAULT_MEDRXIV_CATEGORIES, empty_fallback=[]
-)
+# =============================================================================
+# Module-level config variables (initialized to None, set by load_config)
+# =============================================================================
 
-# Email settings for digest
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT") or "587")
-SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
-EMAIL_FROM = os.getenv("EMAIL_FROM")
-EMAIL_TO = os.getenv("EMAIL_TO")
+# Paths
+DATA_DIR: Path = Path.home() / ".paperfind"  # Default, updated by load_config
+DAILY_PAPERS_DB: Path = DATA_DIR / "daily_papers.db"
+ZOTERO_DB: Path = DATA_DIR / "zotero_meta.db"
+
+# API Keys and settings
+OPENAI_API_KEY: Optional[str] = None
+ZOTERO_API_KEY: Optional[str] = None
+ZOTERO_USER_ID: Optional[str] = None
+ZOTERO_LIBRARY_TYPE: str = "user"
+CROSSREF_EMAIL: Optional[str] = None
+LLM_MODEL: str = "gpt-4o-mini"
+
+# Paper source categories
+ARXIV_CATEGORIES: list[str] = _DEFAULT_ARXIV_CATEGORIES
+BIORXIV_CATEGORIES: list[str] = _DEFAULT_BIORXIV_CATEGORIES
+MEDRXIV_CATEGORIES: list[str] = _DEFAULT_MEDRXIV_CATEGORIES
+CHEMRXIV_CATEGORIES: list[str] = _DEFAULT_CHEMRXIV_CATEGORIES
+
+# Email settings
+SMTP_HOST: str = "smtp.gmail.com"
+SMTP_PORT: int = 587
+SMTP_USER: Optional[str] = None
+SMTP_PASSWORD: Optional[str] = None
+EMAIL_FROM: Optional[str] = None
+EMAIL_TO: Optional[str] = None
 
 
+# =============================================================================
+# Helper functions
+# =============================================================================
+
+def _get_model_suffix() -> str:
+    """Get sanitized provider and model name for directory suffix."""
+    from paperfind.embeddings import get_embedding_model, get_embedding_provider, sanitize_model_name
+
+    provider = get_embedding_provider()
+    model = sanitize_model_name(get_embedding_model())
+    return f"{provider}_{model}"
+
+
+def get_chroma_store_dir() -> str:
+    """Get the ChromaDB store directory for the current model."""
+    return str(DATA_DIR / f"chroma_store_{_get_model_suffix()}")
+
+
+def get_zotero_vectors_dir() -> str:
+    """Get the Zotero vectors directory for the current model."""
+    return str(DATA_DIR / f"zotero_vectors_{_get_model_suffix()}")
+
+
+# =============================================================================
 # Configuration validation
+# =============================================================================
 class ConfigValidationError(Exception):
     """Raised when required configuration is missing."""
 
@@ -261,17 +403,11 @@ def get_config_status() -> dict:
 
     Returns a dict with:
         - data_dir: Path to data directory
-        - env_file_loaded: Whether .env was found
+        - config_file: Path to loaded config file (or None)
+        - config_loaded: Whether config has been loaded
         - operations: Dict of operation -> list of missing vars
     """
     from paperfind.embeddings import get_embedding_model, get_embedding_provider
-
-    # Check if .env file exists
-    env_file_loaded = False
-    if Path(".env").exists():
-        env_file_loaded = True
-    elif (DATA_DIR / ".env").exists():
-        env_file_loaded = True
 
     operations = {
         "zotero": validate_config("zotero", raise_on_error=False),
@@ -281,7 +417,8 @@ def get_config_status() -> dict:
 
     return {
         "data_dir": str(DATA_DIR),
-        "env_file_loaded": env_file_loaded,
+        "config_file": str(_config_path) if _config_path else None,
+        "config_loaded": _config_loaded,
         "embedding_provider": get_embedding_provider(),
         "embedding_model": get_embedding_model(),
         "operations": operations,

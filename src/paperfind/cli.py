@@ -39,6 +39,12 @@ def main() -> None:
 
     # Global options
     parser.add_argument(
+        "-c", "--config",
+        type=str,
+        metavar="PATH",
+        help="Path to .env config file (default: .env in current directory)",
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose output with timestamps",
@@ -222,6 +228,23 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
 
+    # Load configuration
+    from paperfind.config import ConfigFileNotFoundError, load_config
+    from paperfind.logging import get_logger
+
+    logger = get_logger(__name__)
+
+    try:
+        config_path = load_config(args.config)
+        if args.verbose:
+            logger.debug(f"Loaded config from: {config_path}")
+    except ConfigFileNotFoundError as e:
+        logger.error(str(e))
+        sys.exit(1)
+    except FileNotFoundError as e:
+        logger.error(str(e))
+        sys.exit(1)
+
     if args.command == "sync":
         from paperfind.fetchers.zotero.sync import run_sync
 
@@ -268,16 +291,14 @@ def main() -> None:
         )
 
     elif args.command == "config":
-        from paperfind.config import DATA_DIR, get_config_status
-        from paperfind.logging import get_logger
+        from paperfind.config import DATA_DIR, get_config_status, get_loaded_config_path
 
-        logger = get_logger(__name__)
         if args.data_dir:
             logger.info(DATA_DIR)
         elif args.check:
             status = get_config_status()
             logger.info(f"Data directory: {status['data_dir']}")
-            logger.info(f"Env file loaded: {'Yes' if status['env_file_loaded'] else 'No'}")
+            logger.info(f"Config file: {status['config_file'] or 'Not loaded'}")
             logger.info(f"Embedding provider: {status['embedding_provider']}")
             logger.info(f"Embedding model: {status['embedding_model']}")
             logger.info("")
@@ -296,9 +317,12 @@ def main() -> None:
                 logger.info("")
                 logger.info("See .env.example for required variables.")
         else:
+            config_file = get_loaded_config_path()
+            logger.info(f"Config file: {config_file}")
             logger.info(f"Data directory: {DATA_DIR}")
-            logger.info("To use a different location, set PAPERFIND_DATA_DIR environment variable.")
-            logger.info("Place your .env file in the data directory or current working directory.")
+            logger.info("")
+            logger.info("To use a different config: paperfind --config /path/to/.env <command>")
+            logger.info("To set data directory: add PAPERFIND_DATA_DIR to your .env file")
             logger.info("Use --check to validate configuration.")
 
     elif args.command == "digest":

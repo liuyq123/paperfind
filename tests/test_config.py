@@ -144,7 +144,8 @@ class TestGetConfigStatus:
         status = get_config_status()
 
         assert "data_dir" in status
-        assert "env_file_loaded" in status
+        assert "config_file" in status
+        assert "config_loaded" in status
         assert "embedding_provider" in status
         assert "embedding_model" in status
         assert "operations" in status
