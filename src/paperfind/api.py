@@ -1,6 +1,5 @@
 """FastAPI application for Paperfind."""
 
-from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
@@ -549,7 +548,7 @@ def embed(
 @app.post("/fetch", response_model=JobResponse)
 def fetch(
     background_tasks: BackgroundTasks,
-    days: int = Query(default=1, ge=1, le=30, description="Number of days to fetch"),
+    days: int = Query(default=2, ge=1, le=30, description="Number of days to fetch"),
     sources: Optional[str] = Query(
         default=None,
         description="Comma-separated sources: crossref,biorxiv,medrxiv,arxiv,chemrxiv",

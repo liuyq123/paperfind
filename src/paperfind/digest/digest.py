@@ -9,7 +9,6 @@ Usage:
     paperfind digest --days 7 -k 20     # Custom settings
 """
 
-from __future__ import annotations
 
 from datetime import date, timedelta
 from typing import Optional
@@ -17,7 +16,12 @@ from typing import Optional
 from paperfind.config import EMAIL_FROM, EMAIL_TO, SMTP_PASSWORD, SMTP_USER
 from paperfind.digest.email import send_email
 from paperfind.digest.template import render_digest
-from paperfind.fetchers.db import get_sent_dois, prune_sent_recommendations, record_sent_dois
+from paperfind.fetchers.db import (
+    get_sent_dois,
+    get_sent_dois_since,
+    prune_sent_recommendations,
+    record_sent_dois,
+)
 from paperfind.fetchers.fetch_papers import fetch_all
 from paperfind.fetchers.vector import upsert_vectors_for_dois
 from paperfind.logging import get_logger
@@ -35,6 +39,7 @@ def run_digest(
     skip_fetch: bool = False,
     rerank: bool = False,
     max_age_days: Optional[int] = None,
+    include_sent_days: Optional[int] = None,
 ) -> None:
     """
     Run the full digest pipeline: fetch papers, generate recommendations, send email.
@@ -49,6 +54,7 @@ def run_digest(
         skip_fetch: If True, skip fetching and use existing papers
         rerank: If True, use cross-encoder reranking (default: False)
         max_age_days: Only recommend papers published within this many days
+        include_sent_days: Include papers sent within last N days (to resend recent digest)
     """
     today = date.today()
 
@@ -77,6 +83,12 @@ def run_digest(
 
     # Get previously sent DOIs to avoid repeats
     sent_dois = get_sent_dois()
+    if include_sent_days:
+        # Re-include papers sent in the last N days (for resending)
+        since_date = today - timedelta(days=include_sent_days)
+        recent_sent = get_sent_dois_since(since_date)
+        sent_dois = sent_dois - recent_sent
+        logger.info(f"    Including {len(recent_sent)} papers sent in last {include_sent_days} day(s)")
     if sent_dois:
         logger.info(f"    Excluding {len(sent_dois)} previously sent recommendations")
 

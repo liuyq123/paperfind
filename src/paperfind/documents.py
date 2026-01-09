@@ -1,6 +1,5 @@
 """Helpers for extracting structured fields from LangChain documents."""
 
-from __future__ import annotations
 
 from typing import Optional, Tuple
 

@@ -7,7 +7,7 @@ Config loading priority:
 1. Explicit path via load_config(config_path)
 2. PAPERFIND_CONFIG environment variable
 3. .env file in current directory
-4. Error with helpful instructions
+4. No file (uses existing env vars) - for CI/GitHub Actions
 """
 
 import os
@@ -30,19 +30,6 @@ class ConfigNotLoadedError(Exception):
         )
 
 
-class ConfigFileNotFoundError(Exception):
-    """Raised when no .env file can be found."""
-
-    def __init__(self):
-        super().__init__(
-            "No .env file found.\n"
-            "Either:\n"
-            "  1. Create .env in current directory (see .env.example)\n"
-            "  2. Run with --config /path/to/.env\n"
-            "  3. Set PAPERFIND_CONFIG=/path/to/.env environment variable"
-        )
-
-
 def get_data_dir() -> Path:
     """Get the data directory, creating it if needed.
     Returns PAPERFIND_DATA_DIR if set, otherwise ~/.paperfind.
@@ -56,18 +43,18 @@ def get_data_dir() -> Path:
     return data_dir
 
 
-def load_config(config_path: Optional[str] = None) -> Path:
-    """Load configuration from .env file.
+def load_config(config_path: Optional[str] = None) -> Optional[Path]:
+    """Load configuration from .env file or use existing environment variables.
 
     Args:
         config_path: Explicit path to .env file. If not provided, checks
-                     PAPERFIND_CONFIG env var, then local .env.
+                     PAPERFIND_CONFIG env var, then local .env, then falls
+                     back to using existing environment variables (for CI).
 
     Returns:
-        Path to the loaded .env file.
+        Path to the loaded .env file, or None if using environment variables.
 
     Raises:
-        ConfigFileNotFoundError: If no .env file can be found.
         FileNotFoundError: If explicit config_path doesn't exist.
     """
     global _config_loaded, _config_path
@@ -92,11 +79,12 @@ def load_config(config_path: Optional[str] = None) -> Path:
     elif Path(".env").exists():
         env_file = Path(".env")
 
-    # No config found
-    else:
-        raise ConfigFileNotFoundError()
+    # Priority 4: No file - use existing environment variables (CI/GitHub Actions)
+    # This is fine, env vars should already be set
 
-    load_dotenv(env_file, override=True)
+    if env_file:
+        load_dotenv(env_file, override=True)
+
     _config_loaded = True
     _config_path = env_file
 

@@ -25,7 +25,7 @@ A paper recommendation system that discovers relevant papers based on your Zoter
   - [Embedding Providers](#embedding-providers)
   - [API Server (optional)](#api-server-optional)
 - [Data Storage](#data-storage)
-- [Developer Docs](#developer-docs)
+- [Internals](#internals)
 - [License](#license)
 
 ## Features
@@ -181,21 +181,20 @@ When enabled with `--rerank`, scores are raw cross-encoder scores where higher i
 Fetch papers from all sources with a single command:
 
 ```bash
-# Fetch today's papers from all sources (CrossRef, bioRxiv, medRxiv, arXiv, ChemRxiv)
+# Fetch recent papers from all sources (CrossRef, bioRxiv, medRxiv, arXiv, ChemRxiv)
 paperfind fetch
 
-# Fetch last 7 days (including today) and rebuild vector embeddings
+# Fetch last 7 days and rebuild vector embeddings
 paperfind fetch --days 7 --rebuild-vectors
 
 # Fetch from specific sources only
 paperfind fetch --source arxiv --source biorxiv
 
-# Fetch 1 day from most sources, but 7 days from arXiv (see note below)
-paperfind fetch --days 1 --arxiv-days 7
-
 # Only rebuild vectors (no fetching)
 paperfind fetch --vectors-only
 ```
+
+**Note on `--days`:** The default is 2 days to handle timezone differences between your machine and the API servers. Since papers are upserted, fetching duplicates is harmless.
 
 **Sources and categories:**
 - **CrossRef**: Journal articles and preprints with DOIs
@@ -230,6 +229,9 @@ paperfind digest -k 20
 
 # Skip fetching new papers before generating the digest
 paperfind digest --skip-fetch
+
+# Resend papers from yesterday's digest (if you deleted the email)
+paperfind digest --include-sent-days 1
 ```
 
 **Required SMTP settings**
@@ -241,6 +243,8 @@ Email delivery requires SMTP configuration. See [`.env.example`](.env.example) f
 **Avoiding repeat recommendations**
 
 The digest automatically tracks which papers have been sent and excludes them from future recommendations. Sent papers are recorded after each successful email and expire after 30 days, allowing them to resurface if still relevant.
+
+If you accidentally delete a digest email, use `--include-sent-days N` to include papers sent within the last N days in the next digest.
 
 **Scheduled runs with GitHub Actions**
 
@@ -362,7 +366,7 @@ database with two schemas (`daily`, `zotero`). To store embeddings in Postgres, 
 
 For database schema details, see [src/README.md](src/README.md#database-schemas).
 
-## Developer Docs
+## Internals
 
 Project internals and architecture live in [src/README.md](src/README.md).
 Test setup and commands live in [tests/README.md](tests/README.md).

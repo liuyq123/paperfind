@@ -12,8 +12,6 @@ Usage:
     paperfind prune --older-than 30    # Delete papers older than 30 days
 """
 
-from __future__ import annotations
-
 import argparse
 import sys
 from typing import Optional
@@ -50,11 +48,6 @@ def main() -> None:
         help="Enable verbose output with timestamps",
     )
     parser.add_argument(
-        "-q", "--quiet",
-        action="store_true",
-        help="Suppress non-essential output",
-    )
-    parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Set log level (default: INFO, or PAPERFIND_LOG_LEVEL env var)",
@@ -81,7 +74,8 @@ def main() -> None:
     # Fetch command
     fetch_parser = subparsers.add_parser("fetch", help="Fetch papers from external sources")
     fetch_parser.add_argument(
-        "--days", type=positive_int, default=1, help="Number of days to look back (default: 1)"
+        "--days", type=positive_int, default=2,
+        help="Number of days to look back (default: 2, to handle timezone differences)"
     )
     fetch_parser.add_argument(
         "--arxiv-days",
@@ -178,7 +172,8 @@ def main() -> None:
     # Digest command
     digest_parser = subparsers.add_parser("digest", help="Send email digest of recommendations")
     digest_parser.add_argument(
-        "--days", type=positive_int, default=1, help="Number of days to fetch papers (default: 1)"
+        "--days", type=positive_int, default=2,
+        help="Number of days to fetch papers (default: 2, to handle timezone differences)"
     )
     digest_parser.add_argument(
         "--arxiv-days",
@@ -210,6 +205,12 @@ def main() -> None:
         default=None,
         help="Only recommend papers published within this many days (avoids repeats)",
     )
+    digest_parser.add_argument(
+        "--include-sent-days",
+        type=positive_int,
+        default=None,
+        help="Include papers sent within last N days (to resend a recent digest)",
+    )
 
     args = parser.parse_args()
 
@@ -217,9 +218,7 @@ def main() -> None:
     from paperfind.logging import setup_logging
 
     log_level: Optional[str] = args.log_level
-    if args.quiet:
-        log_level = "WARNING"
-    elif args.verbose and not log_level:
+    if args.verbose and not log_level:
         log_level = "DEBUG"
 
     setup_logging(level=log_level, verbose=args.verbose)
@@ -229,7 +228,7 @@ def main() -> None:
         sys.exit(0)
 
     # Load configuration
-    from paperfind.config import ConfigFileNotFoundError, load_config
+    from paperfind.config import load_config
     from paperfind.logging import get_logger
 
     logger = get_logger(__name__)
@@ -237,10 +236,10 @@ def main() -> None:
     try:
         config_path = load_config(args.config)
         if args.verbose:
-            logger.debug(f"Loaded config from: {config_path}")
-    except ConfigFileNotFoundError as e:
-        logger.error(str(e))
-        sys.exit(1)
+            if config_path:
+                logger.debug(f"Loaded config from: {config_path}")
+            else:
+                logger.debug("Using environment variables (no .env file)")
     except FileNotFoundError as e:
         logger.error(str(e))
         sys.exit(1)
@@ -337,6 +336,7 @@ def main() -> None:
             skip_fetch=args.skip_fetch,
             rerank=args.rerank,
             max_age_days=args.max_age,
+            include_sent_days=args.include_sent_days,
         )
 
     elif args.command == "prune":

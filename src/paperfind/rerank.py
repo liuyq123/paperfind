@@ -4,7 +4,6 @@ Cross-encoder reranking utilities.
 Default model: mixedbread-ai/mxbai-rerank-base-v1
 """
 
-from __future__ import annotations
 
 import os
 from functools import lru_cache

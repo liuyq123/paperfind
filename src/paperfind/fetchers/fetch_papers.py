@@ -101,16 +101,15 @@ def fetch_all(
     counts: Dict[str, int] = {}
     fetched_dois: List[str] = []
 
-    # CrossRef
+    # CrossRef (journal articles only - preprints come from dedicated sources)
     if "crossref" in sources:
-        logger.info("[CrossRef] Fetching journal articles and preprints...")
+        logger.info("[CrossRef] Fetching journal articles...")
         crossref_papers = []
 
         for d in range(days):
             target = end_date - timedelta(days=d)
-            for type_filter in ["journal-article", "posted-content"]:
-                papers = fetch_crossref(target, type_filter)
-                crossref_papers.extend(papers)
+            papers = fetch_crossref(target, type_filter="journal-article")
+            crossref_papers.extend(papers)
 
         for paper in crossref_papers:
             upsert_work(conn, paper)

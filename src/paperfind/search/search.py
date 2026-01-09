@@ -10,7 +10,6 @@ Usage:
     paperfind search "your query" -k 10
 """
 
-from __future__ import annotations
 
 from typing import List, Optional, Set, Tuple
 

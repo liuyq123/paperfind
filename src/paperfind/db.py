@@ -1,6 +1,5 @@
 """Database helpers for SQLite and optional Postgres backend."""
 
-from __future__ import annotations
 
 import os
 import sqlite3

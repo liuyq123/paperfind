@@ -1,6 +1,5 @@
 """Vector store abstraction for Chroma (default) and optional pgvector backend."""
 
-from __future__ import annotations
 
 import hashlib
 import json

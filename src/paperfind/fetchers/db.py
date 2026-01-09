@@ -1,6 +1,5 @@
 """Database helpers for paper fetchers."""
 
-from __future__ import annotations
 
 from datetime import date
 from typing import List, Tuple
@@ -179,6 +178,31 @@ def get_sent_dois() -> set[str]:
     table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
 
     cur.execute(f"SELECT doi FROM {table}")
+    dois = {row["doi"] for row in cur.fetchall()}
+    conn.close()
+    return dois
+
+
+def get_sent_dois_since(since_date: date) -> set[str]:
+    """Get DOIs sent on or after a specific date.
+
+    Args:
+        since_date: Only return DOIs sent on or after this date.
+
+    Returns:
+        Set of DOIs that have been sent since the given date.
+    """
+    conn = get_conn(DAILY_SCHEMA)
+
+    if not table_exists(conn, DAILY_SCHEMA, "sent_recommendations"):
+        conn.close()
+        return set()
+
+    cur = conn.cursor()
+    table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
+    ph = placeholder()
+
+    cur.execute(f"SELECT doi FROM {table} WHERE sent_date >= {ph}", (since_date,))
     dois = {row["doi"] for row in cur.fetchall()}
     conn.close()
     return dois

@@ -1,6 +1,5 @@
 """HTML email template for digest."""
 
-from __future__ import annotations
 
 from datetime import date
 from html import escape
