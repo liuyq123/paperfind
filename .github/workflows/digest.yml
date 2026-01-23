@@ -86,7 +86,8 @@ jobs:
         run: |
           paperfind digest \
             --skip-fetch \
-            -k ${{ github.event.inputs.num_results || '10' }}
+            -k ${{ github.event.inputs.num_results || '100' }} \
+            --keywords "drug discovery" "machine learning molecule discovery" "computational biology" "protein design"
             # --rerank  # Uncomment to enable cross-encoder reranking for higher quality
 
       - name: Prune old papers

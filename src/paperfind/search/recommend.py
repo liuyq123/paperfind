@@ -13,11 +13,12 @@ Usage:
 
 from datetime import date, timedelta
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from langchain_core.documents import Document
 
 from paperfind.config import ZOTERO_DB
+from paperfind.embeddings import get_embeddings
 from paperfind.db import (
     ZOTERO_SCHEMA,
     get_conn,
@@ -202,6 +203,72 @@ def _rerank_recommendations(
     return reranked[:k], True
 
 
+def search_by_keywords(
+    keywords: List[str],
+    k: int = 50,
+    max_age_days: Optional[int] = None,
+    exclude_dois: Optional[Set[str]] = None,
+) -> Dict[str, Tuple[float, Document, str]]:
+    """
+    Search daily papers by semantic keyword matching.
+
+    Embeds each keyword phrase and searches for similar papers.
+
+    Args:
+        keywords: List of keyword phrases to search for
+        k: Number of results to return per keyword
+        max_age_days: Only include papers published within this many days
+        exclude_dois: Set of DOIs to exclude from results
+
+    Returns:
+        Dict mapping DOI to (score, document, matched_keyword)
+    """
+    embeddings_model = get_embeddings()
+    daily_vectordb = get_vector_store()
+
+    exclude_dois_normalized = {doi.lower() for doi in exclude_dois} if exclude_dois else set()
+
+    cutoff_date = None
+    if max_age_days is not None:
+        cutoff_date = date.today() - timedelta(days=max_age_days - 1)
+
+    results: Dict[str, Tuple[float, Document, str]] = {}
+
+    for keyword in keywords:
+        logger.info(f"Searching for papers matching: '{keyword}'")
+        keyword_embedding = embeddings_model.embed_query(keyword)
+        matches = similarity_search_by_vector(daily_vectordb, keyword_embedding, k=k)
+
+        for doc, score in matches:
+            doi = doc.metadata.get("doi", "")
+            if not doi:
+                continue
+
+            doi_lower = doi.lower()
+
+            # Skip if in exclude list
+            if exclude_dois_normalized and doi_lower in exclude_dois_normalized:
+                continue
+
+            # Skip if paper is older than cutoff date
+            if cutoff_date is not None:
+                created_date_str = doc.metadata.get("created_date")
+                if created_date_str:
+                    try:
+                        paper_date = date.fromisoformat(str(created_date_str)[:10])
+                        if paper_date < cutoff_date:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+
+            # Keep best score for each DOI
+            if doi not in results or score < results[doi][0]:
+                results[doi] = (score, doc, keyword)
+
+    logger.info(f"Found {len(results)} unique papers matching keywords")
+    return results
+
+
 def get_recommendations(
     k: int = 10,
     collection: Optional[str] = None,
@@ -210,12 +277,14 @@ def get_recommendations(
     return_rerank_used: bool = False,
     max_age_days: Optional[int] = None,
     exclude_dois: Optional[Set[str]] = None,
+    keywords: Optional[List[str]] = None,
 ) -> RecommendationResult:
     """
-    Get paper recommendations based on Zotero library.
+    Get paper recommendations based on Zotero library and/or keywords.
 
     Uses pre-embedded Zotero papers to find similar papers
-    from the daily papers database.
+    from the daily papers database. Optionally also searches by
+    semantic keyword matching.
 
     Args:
         k: Number of recommendations to return
@@ -225,6 +294,7 @@ def get_recommendations(
         return_rerank_used: If True, returns (recommendations, rerank_used)
         max_age_days: Only recommend papers published within this many days
         exclude_dois: Set of DOIs to exclude from recommendations (e.g., previously sent)
+        keywords: Optional list of keyword phrases for semantic matching
     """
     def _return_empty() -> RecommendationResult:
         empty: RecommendationList = []
@@ -331,6 +401,33 @@ def get_recommendations(
             if doi not in recommendations or score < recommendations[doi][0]:
                 recommendations[doi] = (score, doc, zotero_title, query_text)
 
+    # Merge with keyword search results if keywords provided
+    if keywords:
+        # Get papers matching keywords
+        all_exclude = existing_dois | exclude_dois_normalized
+        keyword_results = search_by_keywords(
+            keywords=keywords,
+            k=candidate_k,
+            max_age_days=max_age_days,
+            exclude_dois=all_exclude,
+        )
+
+        # Build the rerank query from keywords
+        keyword_query = " ".join(keywords)
+
+        # Merge: keep best score per DOI (no special boost for dual-match)
+        for doi, (kw_score, kw_doc, matched_keyword) in keyword_results.items():
+            if doi in recommendations:
+                # Paper matches both - keep whichever has better score
+                old_score, old_doc, zotero_title, _ = recommendations[doi]
+                if kw_score < old_score:
+                    recommendations[doi] = (kw_score, old_doc, zotero_title, keyword_query)
+            else:
+                # Keyword-only match - add with keyword as source
+                recommendations[doi] = (kw_score, kw_doc, f"[keyword: {matched_keyword}]", keyword_query)
+
+        logger.info(f"After merging with keywords: {len(recommendations)} total candidates")
+
     # Sort by score (lower is better for distance)
     sorted_recs = sorted(recommendations.items(), key=lambda x: x[1][0])
 
@@ -387,10 +484,14 @@ def run_recommend(
     rerank: bool = False,
     rerank_candidates: int = 50,
     max_age_days: Optional[int] = None,
+    keywords: Optional[List[str]] = None,
 ) -> None:
     """Run paper recommendations with parsed parameters."""
     print("=" * 60)
-    print("Paper Recommendations Based on Your Zotero Library")
+    if keywords:
+        print("Paper Recommendations Based on Your Zotero Library + Keywords")
+    else:
+        print("Paper Recommendations Based on Your Zotero Library")
     print("=" * 60)
 
     recommendations, rerank_used = get_recommendations(
@@ -400,6 +501,7 @@ def run_recommend(
         rerank_candidates=rerank_candidates,
         return_rerank_used=True,
         max_age_days=max_age_days,
+        keywords=keywords,
     )
 
     if not recommendations:

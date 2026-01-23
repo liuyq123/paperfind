@@ -183,15 +183,18 @@ def get_sent_dois() -> set[str]:
     return dois
 
 
-def get_sent_dois_since(since_date: date) -> set[str]:
-    """Get DOIs sent on or after a specific date.
+def get_sent_dois_from_last_n_digests(n: int) -> set[str]:
+    """Get DOIs from the last N digests (by distinct sent_date).
 
     Args:
-        since_date: Only return DOIs sent on or after this date.
+        n: Number of most recent digests to include.
 
     Returns:
-        Set of DOIs that have been sent since the given date.
+        Set of DOIs that were sent in the last N digests.
     """
+    if n < 1:
+        return set()
+
     conn = get_conn(DAILY_SCHEMA)
 
     if not table_exists(conn, DAILY_SCHEMA, "sent_recommendations"):
@@ -200,9 +203,18 @@ def get_sent_dois_since(since_date: date) -> set[str]:
 
     cur = conn.cursor()
     table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
-    ph = placeholder()
 
-    cur.execute(f"SELECT doi FROM {table} WHERE sent_date >= {ph}", (since_date,))
+    # Get the last N distinct sent_dates
+    cur.execute(f"SELECT DISTINCT sent_date FROM {table} ORDER BY sent_date DESC LIMIT {n}")
+    dates = [row["sent_date"] for row in cur.fetchall()]
+
+    if not dates:
+        conn.close()
+        return set()
+
+    # Get all DOIs from those dates
+    placeholders_str = ", ".join([placeholder() for _ in dates])
+    cur.execute(f"SELECT doi FROM {table} WHERE sent_date IN ({placeholders_str})", tuple(dates))
     dois = {row["doi"] for row in cur.fetchall()}
     conn.close()
     return dois

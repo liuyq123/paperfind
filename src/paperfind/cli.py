@@ -129,6 +129,13 @@ def main() -> None:
         default=None,
         help="Only recommend papers published within this many days",
     )
+    rec_parser.add_argument(
+        "--keywords",
+        nargs="+",
+        type=str,
+        metavar="PHRASE",
+        help="Semantic keyword phrases to match (e.g., --keywords 'protein design' 'drug discovery')",
+    )
     rec_parser.set_defaults(rerank=False)
 
     # Search command
@@ -206,10 +213,17 @@ def main() -> None:
         help="Only recommend papers published within this many days (avoids repeats)",
     )
     digest_parser.add_argument(
-        "--include-sent-days",
+        "--include-last-digests",
         type=positive_int,
         default=None,
-        help="Include papers sent within last N days (to resend a recent digest)",
+        help="Include papers from the last N digests (to resend)",
+    )
+    digest_parser.add_argument(
+        "--keywords",
+        nargs="+",
+        type=str,
+        metavar="PHRASE",
+        help="Semantic keyword phrases to match (e.g., --keywords 'protein design' 'drug discovery')",
     )
 
     args = parser.parse_args()
@@ -275,6 +289,7 @@ def main() -> None:
             rerank=args.rerank,
             rerank_candidates=args.rerank_candidates,
             max_age_days=args.max_age,
+            keywords=args.keywords,
         )
 
     elif args.command == "search":
@@ -336,7 +351,8 @@ def main() -> None:
             skip_fetch=args.skip_fetch,
             rerank=args.rerank,
             max_age_days=args.max_age,
-            include_sent_days=args.include_sent_days,
+            include_last_digests=args.include_last_digests,
+            keywords=args.keywords,
         )
 
     elif args.command == "prune":

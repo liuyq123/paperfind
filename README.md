@@ -31,6 +31,7 @@ A paper recommendation system that discovers relevant papers based on your Zoter
 ## Features
 
 - **Recommendations**: Discover papers similar to your Zotero library
+- **Semantic Keyword Matching**: Find papers by topic using natural language keywords (e.g., "protein design" matches related concepts)
 - **Multi-source Fetching**: CrossRef, bioRxiv, medRxiv, arXiv, ChemRxiv
 - **Semantic Search**: Vector search with OpenAI, Ollama, or HuggingFace embeddings
 - **RAG**: Ask questions about your paper collection
@@ -172,6 +173,25 @@ paperfind recommend --rerank
 paperfind recommend --rerank --rerank-candidates 50
 ```
 
+**Semantic keyword matching**
+
+Use `--keywords` to find papers by topic. Keywords are matched semantically - "protein design" will find papers about related concepts like "de novo protein synthesis" or "computational protein folding" even if they don't contain the exact phrase:
+
+```bash
+# Find papers about a specific topic
+paperfind recommend --keywords "protein design"
+
+# Combine multiple keywords (results are merged)
+paperfind recommend --keywords "protein design" "machine learning"
+
+# Combine keywords with Zotero-based recommendations
+# Papers matching either source are included
+paperfind recommend --collection "my research" --keywords "drug discovery"
+
+# Use reranking for better keyword relevance
+paperfind recommend --keywords "active learning" --rerank
+```
+
 The markdown file includes title, authors, abstract, date, source, and DOI links for each paper.
 Reranking (disabled by default) uses the cross-encoder model in `RERANK_MODEL` (default: `mixedbread-ai/mxbai-rerank-base-v1`).
 When enabled with `--rerank`, scores are raw cross-encoder scores where higher is better.
@@ -230,8 +250,12 @@ paperfind digest -k 20
 # Skip fetching new papers before generating the digest
 paperfind digest --skip-fetch
 
-# Resend papers from yesterday's digest (if you deleted the email)
-paperfind digest --include-sent-days 1
+# Resend papers from the last digest (if you deleted the email)
+paperfind digest --include-last-digests 1
+
+# Include papers matching specific keywords
+paperfind digest --keywords "protein design"
+paperfind digest --keywords "drug discovery" "machine learning"
 ```
 
 **Required SMTP settings**
@@ -244,7 +268,7 @@ Email delivery requires SMTP configuration. See [`.env.example`](.env.example) f
 
 The digest automatically tracks which papers have been sent and excludes them from future recommendations. Sent papers are recorded after each successful email and expire after 30 days, allowing them to resurface if still relevant.
 
-If you accidentally delete a digest email, use `--include-sent-days N` to include papers sent within the last N days in the next digest.
+If you accidentally delete a digest email, use `--include-last-digests N` to include papers from the last N digests in your next email.
 
 **Scheduled runs with GitHub Actions**
 
