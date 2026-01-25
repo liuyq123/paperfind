@@ -217,6 +217,7 @@ def run_fetch(
     logger.info("=" * 50)
 
     if rebuild_vectors_flag:
-        rebuild_vectors()
+        if not rebuild_vectors():
+            logger.error("Vector rebuild failed.")
     else:
         upsert_vectors_for_dois(sorted(set(fetched_dois)))

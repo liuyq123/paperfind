@@ -39,7 +39,7 @@ def render_digest(
     Args:
         recommendations: List of (doi, (score, doc, zotero_title)) tuples
         digest_date: Date of the digest
-        rerank: If True, scores are rerank scores (not vector similarity)
+        rerank: If True, scores are LLM scores (not vector similarity)
 
     Returns:
         HTML string
@@ -63,7 +63,7 @@ def render_digest(
         if not _is_valid_url(doi_link):
             doi_link = ""
         if rerank:
-            score_line = f"Rerank score {score:.4f}"
+            score_line = f"LLM score {score:.1f}/10"
         else:
             similarity = max(0.0, 1 - score)  # Convert cosine distance to similarity
             score_line = f"{similarity:.0%} similar"

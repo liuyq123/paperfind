@@ -20,6 +20,8 @@ A paper recommendation system that discovers relevant papers based on your Zoter
   - [Get Recommendations](#get-recommendations)
   - [Fetch Papers](#fetch-papers)
   - [Email Digest](#email-digest)
+  - [Generate Rerank Preferences](#generate-rerank-preferences)
+  - [Improve Preferences with Feedback](#improve-preferences-with-feedback)
   - [Semantic Search](#semantic-search)
   - [Prune Old Papers](#prune-old-papers)
   - [Embedding Providers](#embedding-providers)
@@ -32,6 +34,7 @@ A paper recommendation system that discovers relevant papers based on your Zoter
 
 - **Recommendations**: Discover papers similar to your Zotero library
 - **Semantic Keyword Matching**: Find papers by topic using natural language keywords (e.g., "protein design" matches related concepts)
+- **LLM Reranking**: Use GPT-4o-mini to rerank papers based on your custom research preferences
 - **Multi-source Fetching**: CrossRef, bioRxiv, medRxiv, arXiv, ChemRxiv
 - **Semantic Search**: Vector search with OpenAI, Ollama, or HuggingFace embeddings
 - **RAG**: Ask questions about your paper collection
@@ -167,10 +170,6 @@ paperfind recommend --collection "active learning"
 
 # Save recommendations to markdown file
 paperfind recommend -o recommendations.md
-
-# Enable cross-encoder reranking for higher quality results
-paperfind recommend --rerank
-paperfind recommend --rerank --rerank-candidates 50
 ```
 
 **Semantic keyword matching**
@@ -187,14 +186,35 @@ paperfind recommend --keywords "protein design" "machine learning"
 # Combine keywords with Zotero-based recommendations
 # Papers matching either source are included
 paperfind recommend --collection "my research" --keywords "drug discovery"
-
-# Use reranking for better keyword relevance
-paperfind recommend --keywords "active learning" --rerank
 ```
 
 The markdown file includes title, authors, abstract, date, source, and DOI links for each paper.
-Reranking (disabled by default) uses the cross-encoder model in `RERANK_MODEL` (default: `mixedbread-ai/mxbai-rerank-base-v1`).
-When enabled with `--rerank`, scores are raw cross-encoder scores where higher is better.
+
+**LLM-based reranking with user preferences**
+
+For more personalized results, use `--rerank` to have an LLM (GPT-4o-mini by default) score papers based on your custom research preferences:
+
+```bash
+# First, generate a preferences file
+paperfind init-preferences --keywords "protein design" "drug discovery"
+
+# Edit the generated file at ~/.paperfind/rerank_preferences.txt
+# Then use LLM reranking
+paperfind recommend --rerank
+```
+
+The preferences file lets you specify what you're interested in and what you're NOT interested in. See [`rerank_preferences.example.txt`](rerank_preferences.example.txt) for an example.
+
+**Default keywords via environment variable**
+
+Instead of passing `--keywords` every time, you can set default keywords in your `.env` file:
+
+```bash
+# In .env (semicolon-separated for multi-word phrases)
+PAPERFIND_KEYWORDS="protein design;drug discovery;machine learning"
+```
+
+CLI `--keywords` flags override this setting when provided.
 
 ### Fetch Papers
 
@@ -208,7 +228,7 @@ paperfind fetch
 paperfind fetch --days 7 --rebuild-vectors
 
 # Fetch from specific sources only
-paperfind fetch --source arxiv --source biorxiv
+paperfind fetch --source arxiv biorxiv
 
 # Only rebuild vectors (no fetching)
 paperfind fetch --vectors-only
@@ -256,6 +276,9 @@ paperfind digest --include-last-digests 1
 # Include papers matching specific keywords
 paperfind digest --keywords "protein design"
 paperfind digest --keywords "drug discovery" "machine learning"
+
+# Use LLM reranking for better personalization
+paperfind digest --rerank
 ```
 
 **Required SMTP settings**
@@ -272,7 +295,92 @@ If you accidentally delete a digest email, use `--include-last-digests N` to inc
 
 **Scheduled runs with GitHub Actions**
 
-To run the digest on a schedule, see [`.github/workflows/digest.yml`](.github/workflows/digest.yml). Store your credentials as repository secrets (Settings → Secrets and variables → Actions).
+To run the digest on a schedule, see [`.github/workflows/digest.yml`](.github/workflows/digest.yml). Store your credentials as repository secrets (Settings → Secrets and variables → Actions):
+
+- `PAPERFIND_KEYWORDS`: Default keywords (semicolon-separated, e.g., `protein design;drug discovery`)
+- `LLM_RERANK_PREFERENCES`: Your preferences text for LLM reranking (optional)
+- Plus SMTP credentials, API keys, etc.
+
+### Generate Rerank Preferences
+
+Generate a preferences file for LLM-based reranking. The command uses an LLM to create an initial preferences file based on your keywords, Zotero collection, or library contents:
+
+```bash
+# Generate from keywords
+paperfind init-preferences --keywords "protein design" "drug discovery"
+
+# Generate from a Zotero collection name + keywords
+paperfind init-preferences --collection "active learning" --keywords "bayesian optimization"
+
+# Generate from your Zotero library (uses paper titles as context)
+paperfind init-preferences
+
+# Save to a custom location
+paperfind init-preferences --keywords "ML" -o ~/my_preferences.txt
+```
+
+The generated file is saved to `~/.paperfind/rerank_preferences.txt` by default. Edit it to refine your interests, then use `paperfind recommend --rerank` or `paperfind digest --rerank`.
+
+**Preferences file format:**
+
+```text
+I'm interested in:
+- Machine learning for drug discovery
+- Protein structure prediction
+- Active learning for molecular property prediction
+
+I'm NOT interested in:
+- Language models for law or finance
+- Pure computer vision without biology applications
+
+Notes:
+- Papers added for datasets don't represent my core interests
+```
+
+### Improve Preferences with Feedback
+
+After receiving recommendations, you can provide feedback to improve future results. Feedback immediately updates your preferences file:
+
+```bash
+# Add a positive preference (you want more of this type)
+paperfind feedback --like -r "Virtual screening methodology and failure analysis papers"
+
+# Add a negative preference (you want to avoid this type)
+paperfind feedback --dislike -r "General antiviral research - only interested in screening methodology"
+
+# Apply changes without confirmation prompt
+paperfind feedback --like -r "Docking accuracy studies" --yes
+```
+
+The `-r/--reason` flag describes the TYPE of paper you want more or fewer of. You don't need to reference specific papers—just describe what you're looking for or want to avoid.
+
+**Example workflow:**
+
+```bash
+# You receive a digest with some irrelevant papers about antivirals
+# (you added a paper to study screening failures, not antivirals)
+paperfind feedback --dislike \
+  -r "General antiviral/antimicrobial research - only interested in screening methodology"
+
+# You want more papers like the good ones you received
+paperfind feedback --like \
+  -r "Papers analyzing why virtual screening predictions fail"
+
+# Output shows current vs proposed preferences for confirmation:
+# CURRENT PREFERENCES:
+# I'm interested in: virtual screening, docking...
+#
+# PROPOSED UPDATED PREFERENCES:
+# I'm interested in:
+# - Virtual screening methodology and failure analysis
+# - Papers analyzing prediction accuracy
+# ...
+# I'm NOT interested in:
+# - General antiviral research (unless about screening methods)
+# ...
+#
+# Apply these changes? [y/N]
+```
 
 ### Semantic Search
 

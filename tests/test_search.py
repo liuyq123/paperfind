@@ -177,13 +177,14 @@ class TestSearchWithScores:
 class TestSearchUtils:
     """Tests for search utility functions."""
 
-    @patch("paperfind.search.search.get_conn")
-    def test_get_collection_zotero_keys_empty(self, mock_get_conn):
+    @patch("paperfind.search.search.get_db")
+    def test_get_collection_zotero_keys_empty(self, mock_get_db):
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
         mock_cursor.fetchone.return_value = None  # Collection not found
-        mock_get_conn.return_value = mock_conn
+        mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
 
         from paperfind.search.search import get_collection_zotero_keys
 
@@ -191,8 +192,8 @@ class TestSearchUtils:
 
         assert keys == set()
 
-    @patch("paperfind.search.search.get_conn")
-    def test_get_collection_zotero_keys_found(self, mock_get_conn):
+    @patch("paperfind.search.search.get_db")
+    def test_get_collection_zotero_keys_found(self, mock_get_db):
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -204,7 +205,8 @@ class TestSearchUtils:
             {"zotero_key": "key1"},
             {"zotero_key": "key2"},
         ]
-        mock_get_conn.return_value = mock_conn
+        mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
 
         from paperfind.search.search import get_collection_zotero_keys
 

@@ -263,3 +263,47 @@ class TestSimilaritySearchByVector:
 
         with pytest.raises(NotImplementedError):
             similarity_search_by_vector(mock_store, [0.1, 0.2], k=3)
+
+    def test_chroma_backend_no_warning(self, caplog):
+        """Chroma backend should not warn about score direction."""
+
+        class MockChroma:
+            def similarity_search_by_vector_with_relevance_scores(self, embedding, k, **kwargs):
+                doc = Document(page_content="Test", metadata={})
+                return [(doc, 0.5)]  # Score in [0, 1] range
+
+        result = similarity_search_by_vector(MockChroma(), [0.1, 0.2], k=3)
+
+        assert len(result) == 1
+        # No warning because "Chroma" is in class name
+        assert "score direction" not in caplog.text.lower()
+
+    def test_unknown_backend_warns_on_relevance_scores(self, caplog):
+        """Unknown backend with [0,1] scores should warn about potential inversion."""
+        import logging
+
+        class UnknownVectorStore:
+            def similarity_search_by_vector_with_relevance_scores(self, embedding, k, **kwargs):
+                doc = Document(page_content="Test", metadata={})
+                return [(doc, 0.8)]  # Score in [0, 1] range - might be relevance!
+
+        with caplog.at_level(logging.WARNING):
+            result = similarity_search_by_vector(UnknownVectorStore(), [0.1, 0.2], k=3)
+
+        assert len(result) == 1
+        # Should warn because unknown backend returned [0,1] scores
+        assert "ranking may be inverted" in caplog.text
+
+    def test_unknown_backend_no_warning_on_distance_scores(self, caplog):
+        """Unknown backend with scores > 1 should not warn (clearly distance)."""
+
+        class UnknownVectorStore:
+            def similarity_search_by_vector_with_relevance_scores(self, embedding, k, **kwargs):
+                doc = Document(page_content="Test", metadata={})
+                return [(doc, 1.5)]  # Score > 1, clearly distance
+
+        result = similarity_search_by_vector(UnknownVectorStore(), [0.1, 0.2], k=3)
+
+        assert len(result) == 1
+        # No warning because score > 1 indicates distance
+        assert "ranking may be inverted" not in caplog.text

@@ -37,10 +37,10 @@ def run_digest(
     collection: Optional[str] = None,
     dry_run: bool = False,
     skip_fetch: bool = False,
-    rerank: bool = False,
     max_age_days: Optional[int] = None,
     include_last_digests: Optional[int] = None,
     keywords: Optional[List[str]] = None,
+    rerank: bool = False,
 ) -> None:
     """
     Run the full digest pipeline: fetch papers, generate recommendations, send email.
@@ -53,10 +53,10 @@ def run_digest(
         collection: Optional Zotero collection to base recommendations on
         dry_run: If True, print HTML instead of sending email
         skip_fetch: If True, skip fetching and use existing papers
-        rerank: If True, use cross-encoder reranking (default: False)
         max_age_days: Only recommend papers published within this many days
         include_last_digests: Include papers from the last N digests (to resend)
         keywords: Optional list of keyword phrases for semantic matching
+        rerank: If True, use LLM-based reranking with user preferences
     """
     today = date.today()
 
@@ -96,11 +96,11 @@ def run_digest(
     recommendations, rerank_used = get_recommendations(
         k=num_recommendations,
         collection=collection,
-        rerank=rerank,
         return_rerank_used=True,
         max_age_days=max_age_days,
         exclude_dois=sent_dois,
         keywords=keywords,
+        rerank=rerank,
     )
 
     if not recommendations:

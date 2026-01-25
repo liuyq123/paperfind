@@ -8,9 +8,22 @@ from typing import Any, Dict, List, Optional
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
+from paperfind.config import load_config
 from paperfind.db import DAILY_SCHEMA, get_conn, placeholder, qualify_table
+from paperfind.logging import get_logger
 
 app = FastAPI(title="Paperfind API", version="0.2.0")
+logger = get_logger(__name__)
+
+
+@app.on_event("startup")
+def load_config_on_startup() -> None:
+    """Load configuration so API runs with the same defaults as the CLI."""
+    try:
+        load_config()
+    except FileNotFoundError as exc:
+        logger.error(str(exc))
+        raise
 
 
 # =============================================================================
@@ -367,8 +380,7 @@ def list_papers(
 def recommend(
     k: int = Query(default=10, ge=1, le=100, description="Number of recommendations"),
     collection: Optional[str] = Query(default=None, description="Zotero collection name"),
-    rerank: bool = Query(default=False, description="Enable cross-encoder reranking"),
-    rerank_candidates: int = Query(default=50, ge=1, description="Candidate pool for reranking"),
+    rerank: bool = Query(default=False, description="Enable LLM-based reranking with user preferences"),
 ) -> RecommendResponse:
     """Get paper recommendations based on your Zotero library."""
     from paperfind.documents import extract_title_and_abstract
@@ -384,9 +396,8 @@ def recommend(
     recommendations, rerank_used = get_recommendations(
         k=k,
         collection=collection,
-        rerank=rerank,
-        rerank_candidates=rerank_candidates,
         return_rerank_used=True,
+        rerank=rerank,
     )
 
     if not recommendations:

@@ -6,8 +6,9 @@ import json
 import os
 import re
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Generator, Iterable, Optional
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -101,22 +102,30 @@ def _pgvector_connect():
     return conn
 
 
+@contextmanager
+def _pgvector_db() -> Generator[Any, None, None]:
+    """Context manager for pgvector connections."""
+    conn = _pgvector_connect()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def _pgvector_table_exists(source: str) -> bool:
     if not is_postgres():
         return False
     try:
-        conn = _pgvector_connect()
+        with _pgvector_db() as conn:
+            schema = _vector_schema(source)
+            table = _vector_table_name(source)
+            return table_exists(conn, schema, table)
     except ImportError as exc:
         logger.error(str(exc))
         return False
     except Exception as exc:
         logger.error(f"Failed to connect to Postgres: {exc}")
         return False
-    schema = _vector_schema(source)
-    table = _vector_table_name(source)
-    exists = table_exists(conn, schema, table)
-    conn.close()
-    return exists
 
 
 def vector_store_exists(source: str = "daily_papers") -> bool:
@@ -184,11 +193,11 @@ class PGVectorStore(VectorStore):
     @classmethod
     def from_texts(
         cls,
-        texts: List[str],
+        texts: list[str],
         embedding: Embeddings,
-        metadatas: Optional[List[dict]] = None,
+        metadatas: Optional[list[dict]] = None,
         *,
-        ids: Optional[List[str]] = None,
+        ids: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> "PGVectorStore":
         source = kwargs.get("source", "daily_papers")
@@ -199,11 +208,11 @@ class PGVectorStore(VectorStore):
     def add_texts(
         self,
         texts: Iterable[str],
-        metadatas: Optional[List[dict]] = None,
+        metadatas: Optional[list[dict]] = None,
         *,
-        ids: Optional[List[str]] = None,
+        ids: Optional[list[str]] = None,
         **kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         text_list = list(texts)
         if not text_list:
             return []
@@ -222,22 +231,21 @@ class PGVectorStore(VectorStore):
             for id_value, embedding, text, metadata in zip(id_list, embeddings, text_list, metadata_list)
         ]
 
-        conn = self._connect()
-        cur = conn.cursor()
-        qualified = self._qualified_table()
-        cur.executemany(
-            f"""
-            INSERT INTO {qualified} (id, embedding, document, metadata)
-            VALUES (%s, %s, %s, %s::jsonb)
-            ON CONFLICT (id) DO UPDATE SET
-                embedding = EXCLUDED.embedding,
-                document = EXCLUDED.document,
-                metadata = EXCLUDED.metadata;
-            """,
-            records,
-        )
-        conn.commit()
-        conn.close()
+        with self._get_db() as conn:
+            cur = conn.cursor()
+            qualified = self._qualified_table()
+            cur.executemany(
+                f"""
+                INSERT INTO {qualified} (id, embedding, document, metadata)
+                VALUES (%s, %s, %s, %s::jsonb)
+                ON CONFLICT (id) DO UPDATE SET
+                    embedding = EXCLUDED.embedding,
+                    document = EXCLUDED.document,
+                    metadata = EXCLUDED.metadata;
+                """,
+                records,
+            )
+            conn.commit()
         return id_list
 
     def similarity_search(
@@ -245,7 +253,7 @@ class PGVectorStore(VectorStore):
         query: str,
         k: int = 4,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
         results = self.similarity_search_with_score(query, k=k, **kwargs)
         return [doc for doc, _ in results]
 
@@ -254,38 +262,37 @@ class PGVectorStore(VectorStore):
         query: str,
         k: int = 4,
         **kwargs: Any,
-    ) -> List[Tuple[Document, float]]:
+    ) -> list[tuple[Document, float]]:
         self._ensure_index()
         embedding = self.embedding_function.embed_query(query)
         return self.similarity_search_by_vector_with_score(embedding, k=k, **kwargs)
 
     def similarity_search_by_vector_with_score(
         self,
-        embedding: List[float],
+        embedding: list[float],
         k: int = 4,
         **kwargs: Any,
-    ) -> List[Tuple[Document, float]]:
+    ) -> list[tuple[Document, float]]:
         """Search using a raw embedding vector."""
         self._ensure_index()
         filter_clause, filter_params = _build_filter_clause(kwargs.get("filter"))
 
-        conn = self._connect()
-        cur = conn.cursor()
-        qualified = self._qualified_table()
-        cur.execute(
-            f"""
-            SELECT document, metadata, (embedding <=> %s) AS distance
-            FROM {qualified}
-            {filter_clause}
-            ORDER BY distance ASC
-            LIMIT %s
-            """,
-            [embedding, *filter_params, k],
-        )
-        rows = cur.fetchall()
-        conn.close()
+        with self._get_db() as conn:
+            cur = conn.cursor()
+            qualified = self._qualified_table()
+            cur.execute(
+                f"""
+                SELECT document, metadata, (embedding <=> %s) AS distance
+                FROM {qualified}
+                {filter_clause}
+                ORDER BY distance ASC
+                LIMIT %s
+                """,
+                [embedding, *filter_params, k],
+            )
+            rows = cur.fetchall()
 
-        results: List[Tuple[Document, float]] = []
+        results: list[tuple[Document, float]] = []
         for row in rows:
             document = row["document"]
             metadata = _normalize_metadata(row["metadata"])
@@ -293,107 +300,106 @@ class PGVectorStore(VectorStore):
             results.append((Document(page_content=document, metadata=metadata), distance))
         return results
 
-    def get_embeddings_by_ids(self, ids: List[str]) -> Dict[str, List[float]]:
+    def get_embeddings_by_ids(self, ids: list[str]) -> dict[str, list[float]]:
         """Return {id: embedding} for requested IDs."""
         if not ids:
             return {}
 
-        conn = self._connect()
-        cur = conn.cursor()
-        qualified = self._qualified_table()
-        placeholders = ", ".join(["%s"] * len(ids))
-        cur.execute(
-            f"SELECT id, embedding FROM {qualified} WHERE id IN ({placeholders})",
-            ids,
-        )
-        rows = cur.fetchall()
-        conn.close()
+        with self._get_db() as conn:
+            cur = conn.cursor()
+            qualified = self._qualified_table()
+            placeholders = ", ".join(["%s"] * len(ids))
+            cur.execute(
+                f"SELECT id, embedding FROM {qualified} WHERE id IN ({placeholders})",
+                ids,
+            )
+            rows = cur.fetchall()
 
         return {row["id"]: list(row["embedding"]) for row in rows}
 
-    def delete(self, ids: Optional[List[str]] = None, where: Optional[dict] = None) -> None:
-        conn = self._connect()
-        cur = conn.cursor()
-        qualified = self._qualified_table()
+    def delete(self, ids: Optional[list[str]] = None, where: Optional[dict] = None) -> None:
+        with self._get_db() as conn:
+            cur = conn.cursor()
+            qualified = self._qualified_table()
 
-        if ids:
-            placeholders = ", ".join(["%s"] * len(ids))
-            cur.execute(f"DELETE FROM {qualified} WHERE id IN ({placeholders})", ids)
-        elif where:
-            clause, params = _build_filter_clause(where)
-            cur.execute(f"DELETE FROM {qualified} {clause}", params)
-        else:
-            cur.execute(f"DELETE FROM {qualified}")
+            if ids:
+                placeholders = ", ".join(["%s"] * len(ids))
+                cur.execute(f"DELETE FROM {qualified} WHERE id IN ({placeholders})", ids)
+            elif where:
+                clause, params = _build_filter_clause(where)
+                cur.execute(f"DELETE FROM {qualified} {clause}", params)
+            else:
+                cur.execute(f"DELETE FROM {qualified}")
 
-        conn.commit()
-        conn.close()
+            conn.commit()
 
     def count(self, where: Optional[dict] = None) -> int:
-        conn = self._connect()
-        cur = conn.cursor()
-        qualified = self._qualified_table()
-        clause, params = _build_filter_clause(where)
-        cur.execute(f"SELECT COUNT(*) AS cnt FROM {qualified} {clause}", params)
-        result = cur.fetchone()["cnt"]
-        conn.close()
-        return int(result)
+        with self._get_db() as conn:
+            cur = conn.cursor()
+            qualified = self._qualified_table()
+            clause, params = _build_filter_clause(where)
+            cur.execute(f"SELECT COUNT(*) AS cnt FROM {qualified} {clause}", params)
+            return int(cur.fetchone()["cnt"])
 
-    def list_ids(self) -> List[str]:
+    def list_ids(self) -> list[str]:
         """Return all document ids in the vector store."""
-        conn = self._connect()
-        cur = conn.cursor()
-        qualified = self._qualified_table()
-        cur.execute(f"SELECT id FROM {qualified}")
-        rows = cur.fetchall()
-        conn.close()
-        return [row["id"] for row in rows]
+        with self._get_db() as conn:
+            cur = conn.cursor()
+            qualified = self._qualified_table()
+            cur.execute(f"SELECT id FROM {qualified}")
+            return [row["id"] for row in cur.fetchall()]
 
     def has_id(self, item_id: str) -> bool:
         """Return True if a document id exists in the vector store."""
-        conn = self._connect()
-        cur = conn.cursor()
-        qualified = self._qualified_table()
-        cur.execute(f"SELECT 1 FROM {qualified} WHERE id = %s LIMIT 1", (item_id,))
-        exists = cur.fetchone() is not None
-        conn.close()
-        return exists
+        with self._get_db() as conn:
+            cur = conn.cursor()
+            qualified = self._qualified_table()
+            cur.execute(f"SELECT 1 FROM {qualified} WHERE id = %s LIMIT 1", (item_id,))
+            return cur.fetchone() is not None
 
     def _connect(self):
         return _pgvector_connect()
+
+    @contextmanager
+    def _get_db(self) -> Generator[Any, None, None]:
+        """Context manager for database connections."""
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _qualified_table(self) -> str:
         return f"{self.schema}.{self.table}"
 
     def _ensure_schema_and_table(self) -> None:
-        conn = self._connect()
-        cur = conn.cursor()
-        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema}")
+        with self._get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema}")
 
-        try:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        except Exception as exc:
-            conn.close()
-            raise RuntimeError(
-                "Failed to enable pgvector extension. "
-                "Make sure `CREATE EXTENSION vector;` succeeds."
-            ) from exc
+            try:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            except Exception as exc:
+                raise RuntimeError(
+                    "Failed to enable pgvector extension. "
+                    "Make sure `CREATE EXTENSION vector;` succeeds."
+                ) from exc
 
-        if not table_exists(conn, self.schema, self.table):
-            dim = self._embedding_dim()
-            qualified = self._qualified_table()
-            cur.execute(
-                f"""
-                CREATE TABLE {qualified} (
-                    id TEXT PRIMARY KEY,
-                    embedding VECTOR({dim}),
-                    document TEXT NOT NULL,
-                    metadata JSONB
-                );
-                """
-            )
+            if not table_exists(conn, self.schema, self.table):
+                dim = self._embedding_dim()
+                qualified = self._qualified_table()
+                cur.execute(
+                    f"""
+                    CREATE TABLE {qualified} (
+                        id TEXT PRIMARY KEY,
+                        embedding VECTOR({dim}),
+                        document TEXT NOT NULL,
+                        metadata JSONB
+                    );
+                    """
+                )
 
-        conn.commit()
-        conn.close()
+            conn.commit()
 
     def _embedding_dim(self) -> int:
         sample = self.embedding_function.embed_query("dimension")
@@ -415,35 +421,32 @@ class PGVectorStore(VectorStore):
         if self._index_created:
             return
 
-        conn = self._connect()
-        if self._index_exists(conn):
-            self._index_created = True
-            conn.close()
-            return
+        with self._get_db() as conn:
+            if self._index_exists(conn):
+                self._index_created = True
+                return
 
-        # Check if there's data to index
-        cur = conn.cursor()
-        qualified = self._qualified_table()
-        cur.execute(f"SELECT COUNT(*) AS cnt FROM {qualified}")
-        count = cur.fetchone()["cnt"]
+            # Check if there's data to index
+            cur = conn.cursor()
+            qualified = self._qualified_table()
+            cur.execute(f"SELECT COUNT(*) AS cnt FROM {qualified}")
+            count = cur.fetchone()["cnt"]
 
-        if count > 0:
-            index_name = self._index_name()
-            logger.debug(f"Creating IVFFlat index on {qualified} ({count} rows)...")
-            cur.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS {index_name}
-                ON {qualified}
-                USING ivfflat (embedding vector_cosine_ops);
-                """
-            )
-            conn.commit()
-            self._index_created = True
-
-        conn.close()
+            if count > 0:
+                index_name = self._index_name()
+                logger.debug(f"Creating IVFFlat index on {qualified} ({count} rows)...")
+                cur.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS {index_name}
+                    ON {qualified}
+                    USING ivfflat (embedding vector_cosine_ops);
+                    """
+                )
+                conn.commit()
+                self._index_created = True
 
 
-def _build_filter_clause(metadata_filter: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
+def _build_filter_clause(metadata_filter: Optional[dict[str, Any]]) -> tuple[str, list[Any]]:
     if not metadata_filter:
         return "", []
     return "WHERE metadata @> %s::jsonb", [json.dumps(metadata_filter)]
@@ -451,8 +454,8 @@ def _build_filter_clause(metadata_filter: Optional[Dict[str, Any]]) -> Tuple[str
 
 def get_embeddings_from_store(
     vectordb: VectorStore,
-    ids: List[str],
-) -> Dict[str, List[float]]:
+    ids: list[str],
+) -> dict[str, list[float]]:
     """
     Get embeddings by ID from any vector store backend.
 
@@ -486,29 +489,54 @@ def get_embeddings_from_store(
 
 def similarity_search_by_vector(
     vectordb: VectorStore,
-    embedding: List[float],
+    embedding: list[float],
     k: int = 4,
     **kwargs: Any,
-) -> List[Tuple[Document, float]]:
+) -> list[tuple[Document, float]]:
     """
     Search by raw embedding vector in any vector store backend.
 
-    Returns list of (Document, distance) tuples.
+    Returns list of (Document, distance) tuples where lower distance = more similar.
+
+    IMPORTANT: This function assumes all backends return distance-like scores
+    (lower = more similar). This is verified for:
+    - PGVectorStore: returns cosine distance (0 = identical, 2 = opposite)
+    - Chroma: returns distance despite method name containing "relevance_scores"
+
+    If adding a new backend, verify it returns distance scores, not relevance
+    scores (which would be higher = more similar).
     """
-    # PGVectorStore has native method
+    # PGVectorStore has native method returning cosine distance
     if isinstance(vectordb, PGVectorStore):
         return vectordb.similarity_search_by_vector_with_score(embedding, k=k, **kwargs)
 
-    # Chroma/LangChain stores have similarity_search_by_vector
+    # Check for Chroma by class name (handles both langchain_chroma.Chroma
+    # and langchain_community.vectorstores.Chroma)
+    backend_name = type(vectordb).__name__
+    is_chroma = "Chroma" in backend_name
+
     if hasattr(vectordb, "similarity_search_by_vector_with_relevance_scores"):
         results = vectordb.similarity_search_by_vector_with_relevance_scores(
             embedding,
             k=k,
             **kwargs,
         )
-        # Note: Despite the method name, Chroma returns distance-like scores
-        # where lower = more similar. No conversion needed.
-        return list(results)
+        results_list = list(results)
+
+        # Chroma returns distance (lower = better) despite the method name.
+        # Warn if this is an unknown backend that might return actual relevance scores.
+        if not is_chroma and results_list:
+            _, first_score = results_list[0]
+            # Relevance scores are typically in [0, 1]. Distance scores can be > 1.
+            # This heuristic isn't perfect but catches obvious cases.
+            if 0 <= first_score <= 1:
+                logger.warning(
+                    f"Backend {backend_name} returned scores in [0, 1] range. "
+                    "If these are relevance scores (higher = better), ranking may be inverted. "
+                    "Verify score direction and update similarity_search_by_vector if needed."
+                )
+
+        return results_list
 
     # Fallback: some stores return without scores
     if hasattr(vectordb, "similarity_search_by_vector"):
@@ -518,7 +546,7 @@ def similarity_search_by_vector(
     raise NotImplementedError(f"Vector store {type(vectordb)} does not support similarity_search_by_vector")
 
 
-def _normalize_metadata(value: Any) -> Dict[str, Any]:
+def _normalize_metadata(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
     if isinstance(value, dict):

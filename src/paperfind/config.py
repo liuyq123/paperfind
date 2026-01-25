@@ -7,7 +7,8 @@ Config loading priority:
 1. Explicit path via load_config(config_path)
 2. PAPERFIND_CONFIG environment variable
 3. .env file in current directory
-4. No file (uses existing env vars) - for CI/GitHub Actions
+4. ~/.paperfind/.env (data directory)
+5. No file (uses existing env vars) - for CI/GitHub Actions
 """
 
 import os
@@ -19,15 +20,6 @@ from dotenv import load_dotenv
 # Track whether config has been loaded
 _config_loaded = False
 _config_path: Optional[Path] = None
-
-
-class ConfigNotLoadedError(Exception):
-    """Raised when config is accessed before load_config() is called."""
-
-    def __init__(self):
-        super().__init__(
-            "Configuration not loaded. Call load_config() first, or use --config flag."
-        )
 
 
 def get_data_dir() -> Path:
@@ -48,8 +40,9 @@ def load_config(config_path: Optional[str] = None) -> Optional[Path]:
 
     Args:
         config_path: Explicit path to .env file. If not provided, checks
-                     PAPERFIND_CONFIG env var, then local .env, then falls
-                     back to using existing environment variables (for CI).
+                     PAPERFIND_CONFIG env var, then local .env, then
+                     ~/.paperfind/.env, then falls back to using existing
+                     environment variables (for CI).
 
     Returns:
         Path to the loaded .env file, or None if using environment variables.
@@ -75,11 +68,15 @@ def load_config(config_path: Optional[str] = None) -> Optional[Path]:
                 f"Config file not found: {env_file} (from PAPERFIND_CONFIG)"
             )
 
-    # Priority 3: Local .env
+    # Priority 3: Local .env (current directory)
     elif Path(".env").exists():
         env_file = Path(".env")
 
-    # Priority 4: No file - use existing environment variables (CI/GitHub Actions)
+    # Priority 4: Data directory .env (~/.paperfind/.env)
+    elif (Path.home() / ".paperfind" / ".env").exists():
+        env_file = Path.home() / ".paperfind" / ".env"
+
+    # Priority 5: No file - use existing environment variables (CI/GitHub Actions)
     # This is fine, env vars should already be set
 
     if env_file:
@@ -98,7 +95,7 @@ def _reload_config_values():
     """Reload all module-level config values from environment."""
     global DATA_DIR, DAILY_PAPERS_DB, ZOTERO_DB
     global OPENAI_API_KEY, ZOTERO_API_KEY, ZOTERO_USER_ID, ZOTERO_LIBRARY_TYPE
-    global CROSSREF_EMAIL, LLM_MODEL
+    global CROSSREF_EMAIL, LLM_MODEL, LLM_RERANK_MODEL
     global ARXIV_CATEGORIES, BIORXIV_CATEGORIES, MEDRXIV_CATEGORIES, CHEMRXIV_CATEGORIES
     global SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, EMAIL_FROM, EMAIL_TO
 
@@ -114,6 +111,7 @@ def _reload_config_values():
     ZOTERO_LIBRARY_TYPE = os.getenv("ZOTERO_LIBRARY_TYPE", "user")
     CROSSREF_EMAIL = os.getenv("CROSSREF_EMAIL")
     LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    LLM_RERANK_MODEL = os.getenv("LLM_RERANK_MODEL", "gpt-4o-mini")
 
     # Paper source categories
     ARXIV_CATEGORIES = _parse_categories(
@@ -271,6 +269,7 @@ ZOTERO_USER_ID: Optional[str] = None
 ZOTERO_LIBRARY_TYPE: str = "user"
 CROSSREF_EMAIL: Optional[str] = None
 LLM_MODEL: str = "gpt-4o-mini"
+LLM_RERANK_MODEL: str = "gpt-4o-mini"
 
 # Paper source categories
 ARXIV_CATEGORIES: list[str] = _DEFAULT_ARXIV_CATEGORIES
@@ -308,6 +307,49 @@ def get_chroma_store_dir() -> str:
 def get_zotero_vectors_dir() -> str:
     """Get the Zotero vectors directory for the current model."""
     return str(DATA_DIR / f"zotero_vectors_{_get_model_suffix()}")
+
+
+def get_rerank_preferences() -> Optional[str]:
+    """Load user preferences for LLM-based reranking.
+
+    Checks in order:
+    1. LLM_RERANK_PREFERENCES environment variable
+    2. rerank_preferences.txt file in data directory
+
+    Returns:
+        User preferences as a string, or None if not configured.
+    """
+    # Priority 1: Environment variable
+    if prefs := os.getenv("LLM_RERANK_PREFERENCES"):
+        return prefs
+
+    # Priority 2: Preferences file
+    prefs_file = DATA_DIR / "rerank_preferences.txt"
+    if prefs_file.exists():
+        return prefs_file.read_text().strip()
+
+    return None
+
+
+def get_keywords() -> Optional[list[str]]:
+    """Load default keywords from environment variable.
+
+    Reads from PAPERFIND_KEYWORDS env var. Keywords should be separated by
+    semicolons (;) to allow multi-word phrases.
+
+    Example:
+        PAPERFIND_KEYWORDS="protein design;drug discovery;machine learning"
+
+    Returns:
+        List of keyword phrases, or None if not configured.
+    """
+    keywords_str = os.getenv("PAPERFIND_KEYWORDS")
+    if not keywords_str:
+        return None
+
+    # Split by semicolon and strip whitespace
+    keywords = [k.strip() for k in keywords_str.split(";") if k.strip()]
+    return keywords if keywords else None
 
 
 # =============================================================================

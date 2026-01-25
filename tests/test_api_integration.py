@@ -86,17 +86,19 @@ def test_recommend_uses_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     recommendations = [("10.1234/example", (0.12, doc, "Seed Paper"))]
 
     monkeypatch.setattr(utils_module, "check_vector_store", lambda *args, **kwargs: True)
-    monkeypatch.setattr(
-        recommend_module,
-        "get_recommendations",
-        lambda *args, **kwargs: (recommendations, True),
-    )
+    def fake_get_recommendations(*args, **kwargs):
+        assert "rerank" in kwargs
+        assert "llm_rerank" not in kwargs
+        assert kwargs["rerank"] is True
+        assert kwargs.get("return_rerank_used") is True
+        return recommendations, True
+
+    monkeypatch.setattr(recommend_module, "get_recommendations", fake_get_recommendations)
 
     response = recommend(
         k=10,
         collection=None,
         rerank=True,
-        rerank_candidates=50,
     )
 
     assert response.count == 1

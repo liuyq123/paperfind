@@ -3,8 +3,9 @@
 
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Generator, Optional, Union
 
 if TYPE_CHECKING:
     import psycopg
@@ -51,6 +52,25 @@ def get_conn(schema: str) -> DBConnection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+@contextmanager
+def get_db(schema: str) -> Generator[DBConnection, None, None]:
+    """Context manager for database connections.
+
+    Automatically closes the connection when exiting the context,
+    even if an exception occurs.
+
+    Usage:
+        with get_db(DAILY_SCHEMA) as conn:
+            cur = conn.cursor()
+            cur.execute(...)
+    """
+    conn = get_conn(schema)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def qualify_table(schema: str, table: str) -> str:

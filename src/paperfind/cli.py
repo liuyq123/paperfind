@@ -10,6 +10,8 @@ Usage:
     paperfind search "query"           # Semantic search
     paperfind digest                   # Send email digest of recommendations
     paperfind prune --older-than 30    # Delete papers older than 30 days
+    paperfind init-preferences         # Generate initial rerank preferences
+    paperfind feedback --like/--dislike -r "reason"  # Update preferences with feedback
 """
 
 import argparse
@@ -86,9 +88,10 @@ def main() -> None:
     )
     fetch_parser.add_argument(
         "--source",
-        action="append",
+        nargs="+",
         choices=["crossref", "biorxiv", "medrxiv", "arxiv", "chemrxiv"],
-        help="Source(s) to fetch from (default: all)",
+        metavar="SOURCE",
+        help="Source(s) to fetch (default: all). Use space-separated values: --source arxiv biorxiv",
     )
     fetch_parser.add_argument(
         "--rebuild-vectors", action="store_true", help="Rebuild vector embeddings after fetching"
@@ -107,23 +110,6 @@ def main() -> None:
     )
     rec_parser.add_argument("-o", "--output", type=str, help="Save recommendations to markdown file")
     rec_parser.add_argument(
-        "--rerank",
-        action="store_true",
-        help="Rerank recommendations with a cross-encoder",
-    )
-    rec_parser.add_argument(
-        "--no-rerank",
-        dest="rerank",
-        action="store_false",
-        help="Disable reranking",
-    )
-    rec_parser.add_argument(
-        "--rerank-candidates",
-        type=int,
-        default=50,
-        help="Number of top candidates to rerank (default: 50)",
-    )
-    rec_parser.add_argument(
         "--max-age",
         type=positive_int,
         default=None,
@@ -136,7 +122,11 @@ def main() -> None:
         metavar="PHRASE",
         help="Semantic keyword phrases to match (e.g., --keywords 'protein design' 'drug discovery')",
     )
-    rec_parser.set_defaults(rerank=False)
+    rec_parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help="Use LLM-based reranking with user preferences (requires ~/.paperfind/rerank_preferences.txt)",
+    )
 
     # Search command
     search_parser = subparsers.add_parser("search", help="Semantic search across papers")
@@ -176,6 +166,30 @@ def main() -> None:
         help="Show what would be deleted without actually deleting",
     )
 
+    # Init-preferences command
+    init_prefs_parser = subparsers.add_parser(
+        "init-preferences",
+        help="Generate initial rerank preferences file from context"
+    )
+    init_prefs_parser.add_argument(
+        "--keywords",
+        nargs="+",
+        type=str,
+        metavar="PHRASE",
+        help="Keywords to base preferences on (e.g., --keywords 'protein design' 'drug discovery')",
+    )
+    init_prefs_parser.add_argument(
+        "--collection",
+        type=str,
+        help="Zotero collection to base preferences on",
+    )
+    init_prefs_parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        help="Output file path (default: ~/.paperfind/rerank_preferences.txt)",
+    )
+
     # Digest command
     digest_parser = subparsers.add_parser("digest", help="Send email digest of recommendations")
     digest_parser.add_argument(
@@ -202,11 +216,6 @@ def main() -> None:
         "--skip-fetch", action="store_true", help="Skip fetching, use existing papers"
     )
     digest_parser.add_argument(
-        "--rerank",
-        action="store_true",
-        help="Enable cross-encoder reranking",
-    )
-    digest_parser.add_argument(
         "--max-age",
         type=positive_int,
         default=None,
@@ -224,6 +233,39 @@ def main() -> None:
         type=str,
         metavar="PHRASE",
         help="Semantic keyword phrases to match (e.g., --keywords 'protein design' 'drug discovery')",
+    )
+    digest_parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help="Use LLM-based reranking with user preferences",
+    )
+
+    # Feedback command - directly updates preferences
+    feedback_parser = subparsers.add_parser(
+        "feedback",
+        help="Update rerank preferences based on feedback"
+    )
+    feedback_group = feedback_parser.add_mutually_exclusive_group(required=True)
+    feedback_group.add_argument(
+        "--like",
+        action="store_true",
+        help="Add a positive preference (papers you want more of)",
+    )
+    feedback_group.add_argument(
+        "--dislike",
+        action="store_true",
+        help="Add a negative preference (papers you want to avoid)",
+    )
+    feedback_parser.add_argument(
+        "--reason", "-r",
+        type=str,
+        required=True,
+        help="Description of what you like/dislike (required)",
+    )
+    feedback_parser.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="Apply changes without confirmation prompt",
     )
 
     args = parser.parse_args()
@@ -280,16 +322,19 @@ def main() -> None:
         )
 
     elif args.command == "recommend":
+        from paperfind.config import get_keywords
         from paperfind.search.recommend import run_recommend
+
+        # Use CLI keywords or fall back to env var
+        keywords = args.keywords or get_keywords()
 
         run_recommend(
             num_results=args.num_results,
             collection=args.collection,
             output=args.output,
-            rerank=args.rerank,
-            rerank_candidates=args.rerank_candidates,
             max_age_days=args.max_age,
-            keywords=args.keywords,
+            keywords=keywords,
+            rerank=args.rerank,
         )
 
     elif args.command == "search":
@@ -339,8 +384,62 @@ def main() -> None:
             logger.info("To set data directory: add PAPERFIND_DATA_DIR to your .env file")
             logger.info("Use --check to validate configuration.")
 
+    elif args.command == "init-preferences":
+        from pathlib import Path
+
+        from paperfind.config import DATA_DIR, get_keywords
+        from paperfind.llm_rerank import generate_preferences
+        from paperfind.search.recommend import get_zotero_papers
+
+        # Use CLI keywords or fall back to env var
+        keywords = args.keywords or get_keywords()
+
+        # Gather Zotero paper titles if available
+        zotero_titles = None
+        try:
+            papers = get_zotero_papers(args.collection)
+            if papers:
+                zotero_titles = [p["title"] for p in papers if p.get("title")]
+                logger.info(f"Found {len(zotero_titles)} papers in Zotero library")
+        except Exception as e:
+            logger.debug(f"Could not load Zotero papers: {e}")
+
+        # Generate preferences
+        try:
+            preferences = generate_preferences(
+                keywords=keywords,
+                collection=args.collection,
+                zotero_titles=zotero_titles,
+            )
+        except ValueError as e:
+            logger.error(str(e))
+            sys.exit(1)
+
+        # Determine output path
+        if args.output:
+            output_path = Path(args.output)
+        else:
+            output_path = DATA_DIR / "rerank_preferences.txt"
+
+        # Write preferences file
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(preferences)
+
+        logger.info(f"Generated preferences file: {output_path}")
+        logger.info("")
+        logger.info("--- Generated Preferences ---")
+        logger.info(preferences)
+        logger.info("--- End ---")
+        logger.info("")
+        logger.info("Edit this file to customize your preferences, then use:")
+        logger.info("  paperfind recommend --rerank")
+
     elif args.command == "digest":
+        from paperfind.config import get_keywords
         from paperfind.digest import run_digest
+
+        # Use CLI keywords or fall back to env var
+        keywords = args.keywords or get_keywords()
 
         run_digest(
             days=args.days,
@@ -349,10 +448,10 @@ def main() -> None:
             collection=args.collection,
             dry_run=args.dry_run,
             skip_fetch=args.skip_fetch,
-            rerank=args.rerank,
             max_age_days=args.max_age,
             include_last_digests=args.include_last_digests,
-            keywords=args.keywords,
+            keywords=keywords,
+            rerank=args.rerank,
         )
 
     elif args.command == "prune":
@@ -379,6 +478,64 @@ def main() -> None:
             if deleted_dois:
                 prune_vectors(deleted_dois)
             logger.info(f"[Prune] Done! Deleted {deleted_count} papers.")
+
+    elif args.command == "feedback":
+        from pathlib import Path
+
+        from paperfind.config import DATA_DIR, get_rerank_preferences
+        from paperfind.llm_rerank import update_preferences_with_feedback
+
+        # Load current preferences
+        current_prefs = get_rerank_preferences()
+        if not current_prefs:
+            logger.error("No preferences file found.")
+            logger.error("Run 'paperfind init-preferences' first to create initial preferences.")
+            sys.exit(1)
+
+        # Determine feedback type
+        feedback_type = "like" if args.like else "dislike"
+        reason = args.reason
+
+        logger.info(f"Processing {feedback_type} feedback: {reason}")
+
+        # Generate updated preferences
+        try:
+            updated_prefs = update_preferences_with_feedback(
+                current_prefs, feedback_type, reason
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate updated preferences: {e}")
+            sys.exit(1)
+
+        # Show comparison
+        print("\n" + "=" * 60)
+        print("CURRENT PREFERENCES:")
+        print("=" * 60)
+        print(current_prefs)
+        print("\n" + "=" * 60)
+        print("PROPOSED UPDATED PREFERENCES:")
+        print("=" * 60)
+        print(updated_prefs)
+        print("=" * 60 + "\n")
+
+        # Confirm unless --yes
+        if not args.yes:
+            try:
+                response = input("Apply these changes? [y/N] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                logger.info("Cancelled. Preferences unchanged.")
+                sys.exit(0)
+
+            if response != "y":
+                logger.info("Cancelled. Preferences unchanged.")
+                sys.exit(0)
+
+        # Write updated preferences
+        output_path = DATA_DIR / "rerank_preferences.txt"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(updated_prefs)
+        logger.info(f"Updated preferences saved to {output_path}")
 
 
 if __name__ == "__main__":

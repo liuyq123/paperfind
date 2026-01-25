@@ -83,8 +83,8 @@ def test_render_digest_with_rerank_enabled() -> None:
     html = render_digest(recommendations, date(2024, 1, 2), rerank=True)
 
     assert "Reranked Paper" in html
-    # Rerank score should be displayed differently
-    assert "0.9" in html or "rerank" in html.lower()
+    # LLM score should be displayed differently
+    assert "LLM score" in html or "0.9/10" in html
 
 
 def test_render_digest_empty_recommendations() -> None:

@@ -1,0 +1,18 @@
+I'm interested in:
+- Machine learning for drug discovery and molecular design
+- Protein structure prediction and design
+- DNA/RNA language models for biology applications
+- Active learning and Bayesian optimization for molecular properties
+- Virtual screening methodology and failure analysis
+- Computational methods for predicting binding affinity
+
+I'm NOT interested in:
+- Language models applied to law, finance, or general NLP
+- Pure computer vision without biological applications
+- Papers about social media or recommendation systems
+- General clinical studies without computational methods
+- Papers about COVID-19/pandemic unless methodology-focused
+
+Notes:
+- Papers added to my library for datasets or citations don't represent my core interests
+- I care more about methodology than specific disease targets

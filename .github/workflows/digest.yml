@@ -41,6 +41,10 @@ jobs:
       # Optional: custom categories (uncomment to override defaults)
       # ARXIV_CATEGORIES: ${{ secrets.ARXIV_CATEGORIES }}
       # BIORXIV_CATEGORIES: ${{ secrets.BIORXIV_CATEGORIES }}
+      # LLM reranking preferences (for --rerank flag)
+      LLM_RERANK_PREFERENCES: ${{ secrets.LLM_RERANK_PREFERENCES }}
+      # Default keywords for recommendations (semicolon-separated)
+      PAPERFIND_KEYWORDS: ${{ secrets.PAPERFIND_KEYWORDS }}
 
     steps:
       - name: Checkout repository
@@ -76,19 +80,15 @@ jobs:
           paperfind fetch \
             --days ${{ github.event.inputs.days || '2' }} \
             --arxiv-days ${{ github.event.inputs.arxiv_days || '3' }} \
-            --source biorxiv \
-            --source medrxiv \
-            --source arxiv \
-            --source chemrxiv \
-            --source crossref
+            --source biorxiv medrxiv arxiv chemrxiv crossref
 
       - name: Run digest
         run: |
           paperfind digest \
             --skip-fetch \
-            -k ${{ github.event.inputs.num_results || '100' }} \
-            --keywords "drug discovery" "machine learning molecule discovery" "computational biology" "protein design"
-            # --rerank  # Uncomment to enable cross-encoder reranking for higher quality
+            -k ${{ github.event.inputs.num_results || '100' }}
+            # Keywords are read from PAPERFIND_KEYWORDS env var (set via secret)
+            # --rerank  # Uncomment to enable LLM reranking (requires LLM_RERANK_PREFERENCES secret)
 
       - name: Prune old papers
         run: |

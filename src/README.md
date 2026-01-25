@@ -13,8 +13,8 @@ src/
     ├── db.py             # Database abstraction (SQLite/Postgres)
     ├── documents.py      # Document parsing utilities
     ├── embeddings.py     # Embedding provider support
+    ├── llm_rerank.py     # LLM-based reranking with user preferences
     ├── logging.py        # Logging configuration
-    ├── rerank.py         # Cross-encoder reranking
     ├── types.py          # Shared type definitions
     ├── vectorstore.py    # Vector store backends (Chroma/pgvector)
     ├── digest/           # Email digest pipeline

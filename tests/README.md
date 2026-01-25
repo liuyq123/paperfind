@@ -30,7 +30,6 @@ pytest --cov=paperfind    # With coverage
 | `test_fetchers.py` | Paper source fetchers |
 | `test_formatting.py` | Console and markdown formatting |
 | `test_recommend.py` | Recommendation engine |
-| `test_rerank.py` | Cross-encoder reranking |
 | `test_retry.py` | Retry logic for API calls |
 | `test_search.py` | Semantic search |
 | `test_sent_recommendations.py` | Sent DOI tracking |

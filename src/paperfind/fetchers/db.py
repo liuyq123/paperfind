@@ -2,12 +2,12 @@
 
 
 from datetime import date
-from typing import List, Tuple
 
 from paperfind.db import (
     DAILY_SCHEMA,
     DBConnection,
     get_conn,
+    get_db,
     is_postgres,
     placeholder,
     placeholders,
@@ -89,7 +89,7 @@ def upsert_work(conn: DBConnection, work: PaperDict) -> None:
     )
 
 
-def get_old_dois(cutoff_date: date) -> List[str]:
+def get_old_dois(cutoff_date: date) -> list[str]:
     """Get DOIs for papers older than the cutoff date.
 
     Args:
@@ -98,21 +98,19 @@ def get_old_dois(cutoff_date: date) -> List[str]:
     Returns:
         List of DOIs for old papers.
     """
-    conn = get_conn(DAILY_SCHEMA)
-    cur = conn.cursor()
-    table = qualify_table(DAILY_SCHEMA, "works")
-    ph = placeholder()
+    with get_db(DAILY_SCHEMA) as conn:
+        cur = conn.cursor()
+        table = qualify_table(DAILY_SCHEMA, "works")
+        ph = placeholder()
 
-    cur.execute(
-        f"SELECT doi FROM {table} WHERE created_date < {ph}",
-        (cutoff_date,),
-    )
-    dois = [row["doi"] for row in cur.fetchall()]
-    conn.close()
-    return dois
+        cur.execute(
+            f"SELECT doi FROM {table} WHERE created_date < {ph}",
+            (cutoff_date,),
+        )
+        return [row["doi"] for row in cur.fetchall()]
 
 
-def prune_papers(cutoff_date: date) -> Tuple[int, List[str]]:
+def prune_papers(cutoff_date: date) -> tuple[int, list[str]]:
     """Delete papers older than the cutoff date.
 
     Args:
@@ -127,18 +125,17 @@ def prune_papers(cutoff_date: date) -> Tuple[int, List[str]]:
     if not dois:
         return 0, []
 
-    conn = get_conn(DAILY_SCHEMA)
-    cur = conn.cursor()
-    table = qualify_table(DAILY_SCHEMA, "works")
-    ph = placeholder()
+    with get_db(DAILY_SCHEMA) as conn:
+        cur = conn.cursor()
+        table = qualify_table(DAILY_SCHEMA, "works")
+        ph = placeholder()
 
-    cur.execute(
-        f"DELETE FROM {table} WHERE created_date < {ph}",
-        (cutoff_date,),
-    )
-    deleted = cur.rowcount
-    conn.commit()
-    conn.close()
+        cur.execute(
+            f"DELETE FROM {table} WHERE created_date < {ph}",
+            (cutoff_date,),
+        )
+        deleted = cur.rowcount
+        conn.commit()
 
     logger.info(f"Deleted {deleted} papers from database")
     return deleted, dois
@@ -146,20 +143,19 @@ def prune_papers(cutoff_date: date) -> Tuple[int, List[str]]:
 
 def init_sent_recommendations_table() -> None:
     """Create the sent_recommendations table if it doesn't exist."""
-    conn = get_conn(DAILY_SCHEMA)
-    cur = conn.cursor()
-    table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
+    with get_db(DAILY_SCHEMA) as conn:
+        cur = conn.cursor()
+        table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
 
-    cur.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {table} (
-            doi TEXT PRIMARY KEY,
-            sent_date DATE NOT NULL
-        );
-        """
-    )
-    conn.commit()
-    conn.close()
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table} (
+                doi TEXT PRIMARY KEY,
+                sent_date DATE NOT NULL
+            );
+            """
+        )
+        conn.commit()
 
 
 def get_sent_dois() -> set[str]:
@@ -168,19 +164,15 @@ def get_sent_dois() -> set[str]:
     Returns:
         Set of DOIs that have been sent in previous digests.
     """
-    conn = get_conn(DAILY_SCHEMA)
+    with get_db(DAILY_SCHEMA) as conn:
+        if not table_exists(conn, DAILY_SCHEMA, "sent_recommendations"):
+            return set()
 
-    if not table_exists(conn, DAILY_SCHEMA, "sent_recommendations"):
-        conn.close()
-        return set()
+        cur = conn.cursor()
+        table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
 
-    cur = conn.cursor()
-    table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
-
-    cur.execute(f"SELECT doi FROM {table}")
-    dois = {row["doi"] for row in cur.fetchall()}
-    conn.close()
-    return dois
+        cur.execute(f"SELECT doi FROM {table}")
+        return {row["doi"] for row in cur.fetchall()}
 
 
 def get_sent_dois_from_last_n_digests(n: int) -> set[str]:
@@ -195,32 +187,27 @@ def get_sent_dois_from_last_n_digests(n: int) -> set[str]:
     if n < 1:
         return set()
 
-    conn = get_conn(DAILY_SCHEMA)
+    with get_db(DAILY_SCHEMA) as conn:
+        if not table_exists(conn, DAILY_SCHEMA, "sent_recommendations"):
+            return set()
 
-    if not table_exists(conn, DAILY_SCHEMA, "sent_recommendations"):
-        conn.close()
-        return set()
+        cur = conn.cursor()
+        table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
 
-    cur = conn.cursor()
-    table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
+        # Get the last N distinct sent_dates
+        cur.execute(f"SELECT DISTINCT sent_date FROM {table} ORDER BY sent_date DESC LIMIT {n}")
+        dates = [row["sent_date"] for row in cur.fetchall()]
 
-    # Get the last N distinct sent_dates
-    cur.execute(f"SELECT DISTINCT sent_date FROM {table} ORDER BY sent_date DESC LIMIT {n}")
-    dates = [row["sent_date"] for row in cur.fetchall()]
+        if not dates:
+            return set()
 
-    if not dates:
-        conn.close()
-        return set()
-
-    # Get all DOIs from those dates
-    placeholders_str = ", ".join([placeholder() for _ in dates])
-    cur.execute(f"SELECT doi FROM {table} WHERE sent_date IN ({placeholders_str})", tuple(dates))
-    dois = {row["doi"] for row in cur.fetchall()}
-    conn.close()
-    return dois
+        # Get all DOIs from those dates
+        placeholders_str = ", ".join([placeholder() for _ in dates])
+        cur.execute(f"SELECT doi FROM {table} WHERE sent_date IN ({placeholders_str})", tuple(dates))
+        return {row["doi"] for row in cur.fetchall()}
 
 
-def record_sent_dois(dois: List[str]) -> int:
+def record_sent_dois(dois: list[str]) -> int:
     """Record DOIs as sent in the sent_recommendations table.
 
     Args:
@@ -234,26 +221,26 @@ def record_sent_dois(dois: List[str]) -> int:
 
     init_sent_recommendations_table()
 
-    conn = get_conn(DAILY_SCHEMA)
-    cur = conn.cursor()
-    table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
-    params = placeholders(2)
+    with get_db(DAILY_SCHEMA) as conn:
+        cur = conn.cursor()
+        table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
+        params = placeholders(2)
 
-    today = date.today()
-    recorded = 0
-    for doi in dois:
-        cur.execute(
-            f"""
-            INSERT INTO {table} (doi, sent_date)
-            VALUES ({params})
-            ON CONFLICT(doi) DO UPDATE SET sent_date = excluded.sent_date;
-            """,
-            (doi, today),
-        )
-        recorded += 1
+        today = date.today()
+        recorded = 0
+        for doi in dois:
+            cur.execute(
+                f"""
+                INSERT INTO {table} (doi, sent_date)
+                VALUES ({params})
+                ON CONFLICT(doi) DO UPDATE SET sent_date = excluded.sent_date;
+                """,
+                (doi, today),
+            )
+            recorded += 1
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+
     logger.debug(f"Recorded {recorded} sent recommendations")
     return recorded
 
@@ -269,24 +256,46 @@ def prune_sent_recommendations(cutoff_date: date) -> int:
     Returns:
         Number of records deleted.
     """
-    conn = get_conn(DAILY_SCHEMA)
+    with get_db(DAILY_SCHEMA) as conn:
+        if not table_exists(conn, DAILY_SCHEMA, "sent_recommendations"):
+            return 0
 
-    if not table_exists(conn, DAILY_SCHEMA, "sent_recommendations"):
-        conn.close()
-        return 0
+        cur = conn.cursor()
+        table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
+        ph = placeholder()
 
-    cur = conn.cursor()
-    table = qualify_table(DAILY_SCHEMA, "sent_recommendations")
-    ph = placeholder()
-
-    cur.execute(
-        f"DELETE FROM {table} WHERE sent_date < {ph}",
-        (cutoff_date,),
-    )
-    deleted = cur.rowcount
-    conn.commit()
-    conn.close()
+        cur.execute(
+            f"DELETE FROM {table} WHERE sent_date < {ph}",
+            (cutoff_date,),
+        )
+        deleted = cur.rowcount
+        conn.commit()
 
     if deleted > 0:
         logger.info(f"Pruned {deleted} old sent recommendations")
     return deleted
+
+
+def get_paper_by_doi(doi: str) -> PaperDict | None:
+    """Get paper details by DOI from the works table.
+
+    Args:
+        doi: Paper DOI to look up.
+
+    Returns:
+        Paper dict if found, None otherwise.
+    """
+    with get_db(DAILY_SCHEMA) as conn:
+        if not table_exists(conn, DAILY_SCHEMA, "works"):
+            return None
+
+        cur = conn.cursor()
+        table = qualify_table(DAILY_SCHEMA, "works")
+        ph = placeholder()
+
+        cur.execute(
+            f"SELECT * FROM {table} WHERE doi = {ph}",
+            (doi,),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None

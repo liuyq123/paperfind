@@ -491,7 +491,7 @@ class TestDigestTemplateRendering:
         mock_render,
         mock_get_recs,
     ):
-        """render_digest should receive the rerank_used flag."""
+        """render_digest should receive the rerank flag."""
         from paperfind.digest.digest import run_digest
 
         doc = Document(page_content="Test", metadata={"doi": "10.1234/test"})

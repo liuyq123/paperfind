@@ -11,7 +11,7 @@ Usage:
 """
 
 
-from typing import List, Optional, Set, Tuple
+from typing import Optional
 
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
@@ -20,8 +20,8 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.vectorstores.base import VectorStore
 from langchain_openai import ChatOpenAI
 
-from paperfind.config import LLM_MODEL
-from paperfind.db import ZOTERO_SCHEMA, get_conn, placeholder, qualify_table
+from paperfind.config import LLM_MODEL, ZOTERO_LIBRARY_TYPE, ZOTERO_USER_ID
+from paperfind.db import ZOTERO_SCHEMA, get_db, placeholder, qualify_table
 from paperfind.logging import get_logger
 from paperfind.search.formatting import format_document
 from paperfind.search.utils import check_vector_store, warn_if_empty
@@ -30,40 +30,54 @@ from paperfind.vectorstore import get_vector_store
 logger = get_logger(__name__)
 
 
-def get_collection_zotero_keys(collection_name: str) -> Set[str]:
+def get_collection_zotero_keys(collection_name: str) -> set[str]:
     """Get all zotero_keys in a collection."""
-    conn = get_conn(ZOTERO_SCHEMA)
-    cur = conn.cursor()
-    collections_table = qualify_table(ZOTERO_SCHEMA, "collections")
-    items_table = qualify_table(ZOTERO_SCHEMA, "items")
-    item_collections_table = qualify_table(ZOTERO_SCHEMA, "item_collections")
-    ph = placeholder()
+    with get_db(ZOTERO_SCHEMA) as conn:
+        cur = conn.cursor()
+        libraries_table = qualify_table(ZOTERO_SCHEMA, "libraries")
+        collections_table = qualify_table(ZOTERO_SCHEMA, "collections")
+        items_table = qualify_table(ZOTERO_SCHEMA, "items")
+        item_collections_table = qualify_table(ZOTERO_SCHEMA, "item_collections")
+        ph = placeholder()
 
-    # Find collection ID by name or key
-    cur.execute(
-        f"SELECT id FROM {collections_table} WHERE collection_key = {ph} OR LOWER(name) = LOWER({ph})",
-        (collection_name, collection_name)
-    )
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return set()
+        try:
+            cur.execute(
+                f"SELECT id FROM {libraries_table} WHERE library_id = {ph} AND library_type = {ph}",
+                (ZOTERO_USER_ID, ZOTERO_LIBRARY_TYPE),
+            )
+        except Exception:
+            return set()
+        row = cur.fetchone()
+        if not row:
+            return set()
+        library_pk = row["id"]
 
-    collection_id = row["id"]
+        # Find collection ID by name or key
+        cur.execute(
+            f"""
+            SELECT id FROM {collections_table}
+            WHERE library_pk = {ph}
+              AND (collection_key = {ph} OR LOWER(name) = LOWER({ph}))
+            """,
+            (library_pk, collection_name, collection_name),
+        )
+        row = cur.fetchone()
+        if not row:
+            return set()
 
-    # Get zotero_keys in collection
-    cur.execute(
-        f"""
-        SELECT i.zotero_key
-        FROM {items_table} i
-        JOIN {item_collections_table} ic ON i.id = ic.item_id
-        WHERE ic.collection_id = {ph}
-        """,
-        (collection_id,)
-    )
-    keys = {r["zotero_key"] for r in cur.fetchall()}
-    conn.close()
-    return keys
+        collection_id = row["id"]
+
+        # Get zotero_keys in collection
+        cur.execute(
+            f"""
+            SELECT i.zotero_key
+            FROM {items_table} i
+            JOIN {item_collections_table} ic ON i.id = ic.item_id
+            WHERE ic.collection_id = {ph}
+            """,
+            (collection_id,)
+        )
+        return {r["zotero_key"] for r in cur.fetchall()}
 
 def get_vectordb(source: str = "daily_papers") -> VectorStore:
     """Get the appropriate vector database based on source."""
@@ -75,24 +89,30 @@ def search(
     k: int = 5,
     source: str = "daily_papers",
     collection: Optional[str] = None,
-) -> List[Document]:
+) -> list[Document]:
     """
     Perform semantic search on the paper database.
 
     Args:
         query: Search query string
-        k: Number of results to return
+        k: Number of results to return (must be positive)
         source: "daily_papers" or "zotero"
         collection: Filter by Zotero collection (zotero source only)
 
     Returns:
         List of matching documents
+
+    Raises:
+        ValueError: If k is not positive
     """
+    if k < 1:
+        raise ValueError(f"k must be positive, got {k}")
+
     vectordb = get_vectordb(source)
     warn_if_empty(vectordb, source)
 
     # If filtering by collection, get allowed zotero_keys
-    allowed_keys: Optional[Set[str]] = None
+    allowed_keys: Optional[set[str]] = None
     if collection and source == "zotero":
         allowed_keys = get_collection_zotero_keys(collection)
         if not allowed_keys:
@@ -118,23 +138,29 @@ def search_with_scores(
     k: int = 5,
     source: str = "daily_papers",
     collection: Optional[str] = None,
-) -> List[Tuple[Document, float]]:
+) -> list[tuple[Document, float]]:
     """
     Perform semantic search and return results with similarity scores.
 
     Args:
         query: Search query string
-        k: Number of results to return
+        k: Number of results to return (must be positive)
         source: "daily_papers" or "zotero"
         collection: Filter by Zotero collection (zotero source only)
 
     Returns:
         List of (document, score) tuples
+
+    Raises:
+        ValueError: If k is not positive
     """
+    if k < 1:
+        raise ValueError(f"k must be positive, got {k}")
+
     vectordb = get_vectordb(source)
     warn_if_empty(vectordb, source)
 
-    allowed_keys: Optional[Set[str]] = None
+    allowed_keys: Optional[set[str]] = None
     if collection and source == "zotero":
         allowed_keys = get_collection_zotero_keys(collection)
         if not allowed_keys:

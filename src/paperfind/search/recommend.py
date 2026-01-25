@@ -8,27 +8,27 @@ Usage:
     paperfind recommend -k 20                        # Get top 20 recommendations
     paperfind recommend --collection "active learning"  # Recommend based on specific collection
     paperfind recommend -o recommendations.md        # Save to markdown file
-    paperfind recommend --no-rerank                  # Disable reranking
+    paperfind recommend --rerank                     # Use LLM-based reranking
 """
 
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Optional
 
 from langchain_core.documents import Document
 
-from paperfind.config import ZOTERO_DB
-from paperfind.embeddings import get_embeddings
+from paperfind.config import ZOTERO_DB, ZOTERO_LIBRARY_TYPE, ZOTERO_USER_ID
 from paperfind.db import (
     ZOTERO_SCHEMA,
     get_conn,
+    get_db,
     is_postgres,
     placeholder,
     qualify_table,
     table_exists,
 )
+from paperfind.embeddings import get_embeddings
 from paperfind.logging import get_logger
-from paperfind.rerank import get_rerank_model, rerank_pairs
 from paperfind.search.formatting import format_document, format_markdown_recommendation
 from paperfind.search.utils import check_vector_store
 from paperfind.types import (
@@ -55,13 +55,11 @@ def _check_zotero_db() -> bool:
         return False
 
     try:
-        conn = get_conn(ZOTERO_SCHEMA)
+        with get_db(ZOTERO_SCHEMA) as conn:
+            has_items = table_exists(conn, ZOTERO_SCHEMA, "items")
     except Exception as exc:
         logger.error(f"Failed to connect to Zotero database: {exc}")
         return False
-
-    has_items = table_exists(conn, ZOTERO_SCHEMA, "items")
-    conn.close()
 
     if not has_items:
         logger.error("No Zotero items found. Run 'paperfind sync' first.")
@@ -71,90 +69,95 @@ def _check_zotero_db() -> bool:
 
 
 def get_collection_id_by_name(collection_name: str) -> Optional[int]:
-    """Look up collection id by collection name or key."""
-    conn = get_conn(ZOTERO_SCHEMA)
-    cur = conn.cursor()
-    table = qualify_table(ZOTERO_SCHEMA, "collections")
-    ph = placeholder()
+    """Look up collection id by collection name or key (scoped to library)."""
+    with get_db(ZOTERO_SCHEMA) as conn:
+        cur = conn.cursor()
+        libraries_table = qualify_table(ZOTERO_SCHEMA, "libraries")
+        table = qualify_table(ZOTERO_SCHEMA, "collections")
+        ph = placeholder()
 
-    # Try by key first
-    cur.execute(
-        f"SELECT id FROM {table} WHERE collection_key = {ph}",
-        (collection_name,)
-    )
-    row = cur.fetchone()
+        try:
+            cur.execute(
+                f"SELECT id FROM {libraries_table} WHERE library_id = {ph} AND library_type = {ph}",
+                (ZOTERO_USER_ID, ZOTERO_LIBRARY_TYPE),
+            )
+        except Exception:
+            return None
+        row = cur.fetchone()
+        if not row:
+            return None
+        library_pk = row["id"]
 
-    if not row:
-        # Try by name (case-insensitive)
+        # Try by key first
         cur.execute(
-            f"SELECT id FROM {table} WHERE LOWER(name) = LOWER({ph})",
-            (collection_name,)
+            f"SELECT id FROM {table} WHERE library_pk = {ph} AND collection_key = {ph}",
+            (library_pk, collection_name),
         )
         row = cur.fetchone()
 
-    conn.close()
-    return row["id"] if row else None
+        if not row:
+            # Try by name (case-insensitive)
+            cur.execute(
+                f"SELECT id FROM {table} WHERE library_pk = {ph} AND LOWER(name) = LOWER({ph})",
+                (library_pk, collection_name),
+            )
+            row = cur.fetchone()
+
+        return row["id"] if row else None
 
 
-def get_zotero_papers(collection: Optional[str] = None) -> List[ZoteroPaper]:
+def get_zotero_papers(collection: Optional[str] = None) -> list[ZoteroPaper]:
     """Get papers from Zotero database (includes zotero_key for embedding lookup)."""
     if not _check_zotero_db():
         return []
 
-    conn = get_conn(ZOTERO_SCHEMA)
-    cur = conn.cursor()
-    items_table = qualify_table(ZOTERO_SCHEMA, "items")
-    item_collections_table = qualify_table(ZOTERO_SCHEMA, "item_collections")
-    ph = placeholder()
+    with get_db(ZOTERO_SCHEMA) as conn:
+        cur = conn.cursor()
+        items_table = qualify_table(ZOTERO_SCHEMA, "items")
+        item_collections_table = qualify_table(ZOTERO_SCHEMA, "item_collections")
+        ph = placeholder()
 
-    if collection:
-        collection_id = get_collection_id_by_name(collection)
-        if collection_id:
-            cur.execute(
-                f"""
-                SELECT i.zotero_key, i.title, i.abstract, i.doi
-                FROM {items_table} i
-                JOIN {item_collections_table} ic ON i.id = ic.item_id
-                WHERE ic.collection_id = {ph}
-                """,
-                (collection_id,)
-            )
+        if collection:
+            collection_id = get_collection_id_by_name(collection)
+            if collection_id:
+                cur.execute(
+                    f"""
+                    SELECT i.zotero_key, i.title, i.abstract, i.doi
+                    FROM {items_table} i
+                    JOIN {item_collections_table} ic ON i.id = ic.item_id
+                    WHERE ic.collection_id = {ph}
+                    """,
+                    (collection_id,)
+                )
+            else:
+                logger.warning(f"Collection '{collection}' not found.")
+                return []
         else:
-            logger.warning(f"Collection '{collection}' not found.")
-            conn.close()
-            return []
-    else:
-        cur.execute(f"SELECT zotero_key, title, abstract, doi FROM {items_table}")
+            cur.execute(f"SELECT zotero_key, title, abstract, doi FROM {items_table}")
 
-    papers = [dict(row) for row in cur.fetchall()]
-    conn.close()
-    return papers
+        return [dict(row) for row in cur.fetchall()]
 
 
-def get_zotero_dois() -> Set[str]:
+def get_zotero_dois() -> set[str]:
     """Get all DOIs from Zotero to exclude from recommendations."""
     if not is_postgres() and not Path(ZOTERO_DB).exists():
         return set()
 
     try:
-        conn = get_conn(ZOTERO_SCHEMA)
+        with get_db(ZOTERO_SCHEMA) as conn:
+            if not table_exists(conn, ZOTERO_SCHEMA, "items"):
+                return set()
+
+            cur = conn.cursor()
+            table = qualify_table(ZOTERO_SCHEMA, "items")
+            cur.execute(f"SELECT doi FROM {table} WHERE doi IS NOT NULL")
+            return {row["doi"].lower() for row in cur.fetchall() if row["doi"]}
     except Exception:
         return set()
-    cur = conn.cursor()
-
-    if not table_exists(conn, ZOTERO_SCHEMA, "items"):
-        conn.close()
-        return set()
-
-    table = qualify_table(ZOTERO_SCHEMA, "items")
-    cur.execute(f"SELECT doi FROM {table} WHERE doi IS NOT NULL")
-    dois = {row["doi"].lower() for row in cur.fetchall() if row["doi"]}
-    conn.close()
-    return dois
 
 
 def _strip_query(
-    recommendations: List[RecommendationWithQuery],
+    recommendations: list[RecommendationWithQuery],
 ) -> RecommendationList:
     return [
         (doi, (score, doc, zotero_title))
@@ -162,53 +165,12 @@ def _strip_query(
     ]
 
 
-def _rerank_recommendations(
-    recommendations: List[RecommendationWithQuery],
-    k: int,
-    rerank_candidates: int,
-) -> Tuple[RecommendationList, bool]:
-    candidate_count = max(k, rerank_candidates)
-    candidates = recommendations[:candidate_count]
-    if not candidates:
-        return [], False
-
-    pairs = [
-        (query_text, doc.page_content)
-        for _, (_, doc, _, query_text) in candidates
-    ]
-
-    model_name = get_rerank_model()
-    logger.info(f"Reranking {len(candidates)} candidates with {model_name}...")
-
-    try:
-        scores = rerank_pairs(pairs, model=model_name)
-    except ImportError as exc:
-        logger.warning(f"Rerank unavailable: {exc}")
-        return _strip_query(recommendations[:k]), False
-    except Exception as exc:
-        logger.error(f"Rerank failed: {exc}")
-        return _strip_query(recommendations[:k]), False
-
-    ranked = sorted(
-        zip(candidates, scores),
-        key=lambda item: item[1],
-        reverse=True,
-    )
-
-    reranked = [
-        (doi, (rerank_score, doc, zotero_title))
-        for (doi, (_, doc, zotero_title, _)), rerank_score in ranked
-    ]
-
-    return reranked[:k], True
-
-
 def search_by_keywords(
-    keywords: List[str],
+    keywords: list[str],
     k: int = 50,
     max_age_days: Optional[int] = None,
-    exclude_dois: Optional[Set[str]] = None,
-) -> Dict[str, Tuple[float, Document, str]]:
+    exclude_dois: Optional[set[str]] = None,
+) -> dict[str, tuple[float, Document, str]]:
     """
     Search daily papers by semantic keyword matching.
 
@@ -216,13 +178,21 @@ def search_by_keywords(
 
     Args:
         keywords: List of keyword phrases to search for
-        k: Number of results to return per keyword
-        max_age_days: Only include papers published within this many days
+        k: Number of results to return per keyword (must be positive)
+        max_age_days: Only include papers published within this many days (must be positive if set)
         exclude_dois: Set of DOIs to exclude from results
 
     Returns:
-        Dict mapping DOI to (score, document, matched_keyword)
+        Dict mapping normalized DOI to (score, document, matched_keyword)
+
+    Raises:
+        ValueError: If k is not positive or max_age_days is not positive when set
     """
+    if k < 1:
+        raise ValueError(f"k must be positive, got {k}")
+    if max_age_days is not None and max_age_days < 1:
+        raise ValueError(f"max_age_days must be positive, got {max_age_days}")
+
     embeddings_model = get_embeddings()
     daily_vectordb = get_vector_store()
 
@@ -232,7 +202,7 @@ def search_by_keywords(
     if max_age_days is not None:
         cutoff_date = date.today() - timedelta(days=max_age_days - 1)
 
-    results: Dict[str, Tuple[float, Document, str]] = {}
+    results: dict[str, tuple[float, Document, str]] = {}
 
     for keyword in keywords:
         logger.info(f"Searching for papers matching: '{keyword}'")
@@ -243,11 +213,10 @@ def search_by_keywords(
             doi = doc.metadata.get("doi", "")
             if not doi:
                 continue
-
-            doi_lower = doi.lower()
+            doi_key = doi.lower()
 
             # Skip if in exclude list
-            if exclude_dois_normalized and doi_lower in exclude_dois_normalized:
+            if exclude_dois_normalized and doi_key in exclude_dois_normalized:
                 continue
 
             # Skip if paper is older than cutoff date
@@ -262,8 +231,8 @@ def search_by_keywords(
                         pass
 
             # Keep best score for each DOI
-            if doi not in results or score < results[doi][0]:
-                results[doi] = (score, doc, keyword)
+            if doi_key not in results or score < results[doi_key][0]:
+                results[doi_key] = (score, doc, keyword)
 
     logger.info(f"Found {len(results)} unique papers matching keywords")
     return results
@@ -272,12 +241,11 @@ def search_by_keywords(
 def get_recommendations(
     k: int = 10,
     collection: Optional[str] = None,
-    rerank: bool = False,
-    rerank_candidates: int = 50,
     return_rerank_used: bool = False,
     max_age_days: Optional[int] = None,
-    exclude_dois: Optional[Set[str]] = None,
-    keywords: Optional[List[str]] = None,
+    exclude_dois: Optional[set[str]] = None,
+    keywords: Optional[list[str]] = None,
+    rerank: bool = False,
 ) -> RecommendationResult:
     """
     Get paper recommendations based on Zotero library and/or keywords.
@@ -287,15 +255,23 @@ def get_recommendations(
     semantic keyword matching.
 
     Args:
-        k: Number of recommendations to return
+        k: Number of recommendations to return (must be positive)
         collection: Optional Zotero collection to base recommendations on
-        rerank: Whether to use cross-encoder reranking
-        rerank_candidates: Number of candidates to consider for reranking
         return_rerank_used: If True, returns (recommendations, rerank_used)
-        max_age_days: Only recommend papers published within this many days
+        max_age_days: Only recommend papers published within this many days (must be positive if set)
         exclude_dois: Set of DOIs to exclude from recommendations (e.g., previously sent)
         keywords: Optional list of keyword phrases for semantic matching
+        rerank: Whether to use LLM-based reranking with user preferences
+
+    Raises:
+        ValueError: If k is not positive or max_age_days is not positive when set
     """
+    # Input validation
+    if k < 1:
+        raise ValueError(f"k must be positive, got {k}")
+    if max_age_days is not None and max_age_days < 1:
+        raise ValueError(f"max_age_days must be positive, got {max_age_days}")
+
     def _return_empty() -> RecommendationResult:
         empty: RecommendationList = []
         return (empty, False) if return_rerank_used else empty
@@ -354,13 +330,14 @@ def get_recommendations(
 
     logger.info(f"Finding papers similar to {len(embeddings)} embedded papers...")
 
-    candidate_k = max(k, rerank_candidates) if rerank else k
+    # Get more candidates if LLM reranking will be used
+    candidate_k = max(k, 50) if rerank else k
 
     for zotero_key, embedding in embeddings.items():
         paper = paper_by_key.get(zotero_key, {})
         zotero_title = paper.get("title", "Unknown")
 
-        # Build query text for reranking (title + abstract)
+        # Build query text for LLM reranking (title + abstract)
         query_parts = []
         if paper.get("title"):
             query_parts.append(paper["title"])
@@ -376,14 +353,14 @@ def get_recommendations(
             if not doi:
                 continue
 
-            doi_lower = doi.lower()
+            doi_key = doi.lower()
 
             # Skip if already in Zotero
-            if doi_lower in existing_dois:
+            if doi_key in existing_dois:
                 continue
 
             # Skip if in exclude list (e.g., previously sent)
-            if exclude_dois_normalized and doi_lower in exclude_dois_normalized:
+            if exclude_dois_normalized and doi_key in exclude_dois_normalized:
                 continue
 
             # Skip if paper is older than cutoff date
@@ -398,8 +375,8 @@ def get_recommendations(
                         pass  # Include papers with unparseable dates
 
             # Keep track of best score for each paper (with source Zotero paper)
-            if doi not in recommendations or score < recommendations[doi][0]:
-                recommendations[doi] = (score, doc, zotero_title, query_text)
+            if doi_key not in recommendations or score < recommendations[doi_key][0]:
+                recommendations[doi_key] = (score, doc, zotero_title, query_text)
 
     # Merge with keyword search results if keywords provided
     if keywords:
@@ -412,31 +389,46 @@ def get_recommendations(
             exclude_dois=all_exclude,
         )
 
-        # Build the rerank query from keywords
+        # Build the query from keywords for LLM reranking
         keyword_query = " ".join(keywords)
 
         # Merge: keep best score per DOI (no special boost for dual-match)
-        for doi, (kw_score, kw_doc, matched_keyword) in keyword_results.items():
-            if doi in recommendations:
+        for doi_key, (kw_score, kw_doc, matched_keyword) in keyword_results.items():
+            if doi_key in recommendations:
                 # Paper matches both - keep whichever has better score
-                old_score, old_doc, zotero_title, _ = recommendations[doi]
+                old_score, old_doc, zotero_title, _ = recommendations[doi_key]
                 if kw_score < old_score:
-                    recommendations[doi] = (kw_score, old_doc, zotero_title, keyword_query)
+                    recommendations[doi_key] = (kw_score, old_doc, zotero_title, keyword_query)
             else:
                 # Keyword-only match - add with keyword as source
-                recommendations[doi] = (kw_score, kw_doc, f"[keyword: {matched_keyword}]", keyword_query)
+                recommendations[doi_key] = (
+                    kw_score,
+                    kw_doc,
+                    f"[keyword: {matched_keyword}]",
+                    keyword_query,
+                )
 
         logger.info(f"After merging with keywords: {len(recommendations)} total candidates")
 
     # Sort by score (lower is better for distance)
     sorted_recs = sorted(recommendations.items(), key=lambda x: x[1][0])
 
+    # If not using LLM reranking, just return top k
     if not rerank:
         results = _strip_query(sorted_recs[:k])
         return (results, False) if return_rerank_used else results
 
-    reranked, rerank_used = _rerank_recommendations(sorted_recs, k, rerank_candidates)
-    return (reranked, rerank_used) if return_rerank_used else reranked
+    # LLM reranking (uses API, supports user preferences)
+    from paperfind.llm_rerank import llm_rerank_candidates
+
+    # Get more candidates for LLM to choose from
+    candidates = sorted_recs[:max(k, 50)]
+    llm_results, llm_used = llm_rerank_candidates(
+        candidates=candidates,
+        keywords=keywords,
+        k=k,
+    )
+    return (llm_results, llm_used) if return_rerank_used else llm_results
 
 
 def format_markdown(
@@ -458,7 +450,7 @@ def format_markdown(
     lines.append(f"---")
     lines.append(f"")
 
-    score_label = "Rerank score" if rerank else None
+    score_label = "LLM score" if rerank else None
     show_similarity = not rerank
 
     for rank, (doi, (score, doc, zotero_title)) in enumerate(recommendations, 1):
@@ -481,10 +473,9 @@ def run_recommend(
     num_results: int = 10,
     collection: Optional[str] = None,
     output: Optional[str] = None,
-    rerank: bool = False,
-    rerank_candidates: int = 50,
     max_age_days: Optional[int] = None,
-    keywords: Optional[List[str]] = None,
+    keywords: Optional[list[str]] = None,
+    rerank: bool = False,
 ) -> None:
     """Run paper recommendations with parsed parameters."""
     print("=" * 60)
@@ -497,11 +488,10 @@ def run_recommend(
     recommendations, rerank_used = get_recommendations(
         k=num_results,
         collection=collection,
-        rerank=rerank,
-        rerank_candidates=rerank_candidates,
         return_rerank_used=True,
         max_age_days=max_age_days,
         keywords=keywords,
+        rerank=rerank,
     )
 
     if not recommendations:
@@ -522,7 +512,7 @@ def run_recommend(
     else:
         # Print to console
         print(f"\nTop {len(recommendations)} recommendations:\n")
-        score_label = "Rerank score" if rerank_used else None
+        score_label = "LLM score" if rerank_used else None
         show_similarity = not rerank_used
         for rank, (doi, (score, doc, zotero_title)) in enumerate(recommendations, 1):
             print(format_document(
